@@ -1108,6 +1108,10 @@ Full tool reference:
 infrastructure without any project-specific logic. Use it to confirm the bench
 still works after changing the portal or the skills.
 
+For the full order of operations (host tier, identifying and backing up each
+board, the partner, the two suite runs, reading the results) see the
+[Bench Verification Runbook](Bench-Verification-Runbook.md).
+
 ### 16.1 Build and flash it
 
 Requires ESP-IDF **6.x** (verified against v6.0.2 for `esp32`, `esp32s3`, and
@@ -1319,6 +1323,7 @@ steps.
 | Slot stuck in `download_mode` | Device left in the bootloader | Flash it, then `POST /api/serial/release` |
 | ESP32-C3 stuck in download mode | DTR asserted on open | `POST /api/serial/reset` |
 | GDB won't connect | OpenOCD not started (classic ESP32 has no USB JTAG) | Check `/api/devices` for `debugging:true`; declare an ESP-Prog in `testbench.json` |
+| JTAG and chip detection fail on every slot; `esp_usb_jtag: could not find or open device!` at `adapter usb location 1-…` | Hub on a bus other than 1 matched to the wrong slot (fixed by `pi/usb_slots.py`) | [Runbook §7](Bench-Verification-Runbook.md#7-slot-recognition-when-the-bench-points-at-the-wrong-usb-port) |
 | WiFi ping fails | Portal not running | `curl http://$BENCH:8080/api/wifi/ping` |
 | wlan0 unavailable | Wrong WiFi mode | Switch to `wifi-testing` mode |
 | AP won't start | hostapd missing | Re-run `install.sh`; check `ssh pi@$BENCH which hostapd` |

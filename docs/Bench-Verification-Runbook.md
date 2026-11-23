@@ -1,0 +1,267 @@
+# Bench Verification Runbook
+
+How to prove a testbench works end to end, and how to diagnose and fix a bench
+whose slots point at the wrong USB port.
+
+Background on each service is in the [User Manual](Harness-User-Manual.md),
+notably [§16 Validating the bench](Harness-User-Manual.md#16-validating-the-bench)
+and [§17 Troubleshooting](Harness-User-Manual.md#17-troubleshooting). This file
+is the order to do things in and what each result means.
+
+Throughout, `BENCH` is the bench's IP address (never a `.local` name, which does
+not resolve from a devcontainer), and `SLOT` is the slot under test:
+
+```bash
+BENCH=<bench-ip>
+SLOT=SLOT1
+```
+
+---
+
+## 1. Host tier: no hardware
+
+Proves the code is sane. It does not prove the bench works.
+
+```bash
+pip install -r requirements-dev.txt
+pytest pytest/host/ -q          # expect all pass
+ruff check .                    # CI pins the ruff version; match it
+```
+
+## 2. Reach the bench
+
+```bash
+curl -s -m 8 http://$BENCH:8080/api/info
+curl -s -m 8 http://$BENCH:8080/api/devices | jq '.slots[] | select(.present)'
+```
+
+If this times out, tell the three causes apart before changing anything:
+
+| Host browser opens `http://$BENCH:8080/api/devices` | `curl` from the container | Meaning |
+|---|---|---|
+| Works | Works | Fine |
+| Works | Times out | The container cannot reach the LAN (VPN, Docker network) |
+| Times out | Times out | The bench is down: on the Pi, `systemctl status rfc2217-portal` and `hostname -I` |
+
+## 3. Know what is in every slot before touching it
+
+Three checks, least intrusive first:
+
+1. **`/api/devices`**: `present`, `devnode`, `detected_chip`, `usb_devices`.
+   `ttyACM*` is a native-USB ESP32; `ttyUSB*` is behind a bridge chip (CP210x,
+   CH340), which has no JTAG and so never gets a `detected_chip`.
+2. **What it is running**: the bench records every slot whether or not anyone
+   is watching. This is passive:
+   ```bash
+   curl -s "http://$BENCH:8080/api/serial/output?slot=$SLOT&lines=200" | jq -r '.lines[].text'
+   ```
+   Look for `Project name:` and `App version:` in the boot banner. The buffer
+   belongs to the *slot*, not the board, so after a swap check the timestamps:
+   older lines came from the previous board.
+3. **What the silicon is**: this reboots the board.
+   ```bash
+   curl -s -X POST http://$BENCH:8080/api/chip/info \
+        -H 'Content-Type: application/json' -d "{\"slot\":\"$SLOT\"}" | jq 'del(.output)'
+   ```
+   Trust this over the label on the board: boards sold or labelled as one
+   variant can carry another. A non-ESP device (a bare USB-serial adapter, for
+   example) fails with `Invalid head of packet (0x00)`.
+
+On the Pi, `lsusb -t` and `ls -l /dev/serial/by-id/` name every device and
+show which bus and hub port it is on.
+
+## 4. Back up before flashing anything
+
+`--run-dut` and the partner setup **overwrite the board's firmware**, and the
+bench does not keep a copy. If the board holds anything worth keeping, read
+the whole flash first:
+
+```bash
+PORT=<the slot's tcp_port from /api/devices>
+esptool --port rfc2217://$BENCH:$PORT read-flash 0 ALL backup-$SLOT.bin
+# restore later:
+esptool --port rfc2217://$BENCH:$PORT write-flash 0 backup-$SLOT.bin
+```
+
+(`POST /api/flash/read` does the same for a region, returned as base64.)
+
+## 5. Put the test partner on a board
+
+The bench suite needs a board running `test-firmware/`, which is built only for
+the **targets in `.github/workflows/test-firmware.yml`** (esp32c3 and esp32s3
+at the time of writing). `debug-test/` has its own target list. A board of any
+other chip cannot be the partner.
+
+Get the image. CI artifacts need `gh auth login`; release assets do not:
+
+```bash
+TARGET=esp32s3          # or esp32c3
+VERSION=<release tag, e.g. v1.0.1>
+D=/tmp/partner && mkdir -p $D && cd $D
+curl -sLO https://github.com/SensorsIot/Embedded-AI-Harness/releases/download/$VERSION/test-partner-$TARGET.tar.gz
+tar xzf test-partner-$TARGET.tar.gz
+```
+
+Flash it through the bench and check that it answers:
+
+```bash
+cd pytest && python3 - "http://$BENCH:8080" /tmp/partner/test-partner-$TARGET $SLOT $TARGET <<'EOF'
+import sys, time
+from testbench_driver import TestbenchDriver
+from conftest import _flash_args_offsets, _dut_answers
+url, image_dir, slot, chip = sys.argv[1:5]
+wt = TestbenchDriver(url)
+r = wt.flash(slot, dict(_flash_args_offsets(image_dir)), chip=chip)
+print({k: v for k, v in r.items() if k != "output"})
+time.sleep(10)
+print("answers ping:", _dut_answers(wt, slot, timeout=15))
+EOF
+```
+
+The suite can restore the partner itself (`WT_TEST_PARTNER_IMAGE`), but only
+on a slot with a `detected_chip`. On a bench with the slot fault in §7 that
+never happens, so flash it by hand.
+
+## 6. Run the bench suite
+
+Without board tests: nothing is flashed, but boards are reset and the Pi's AP
+and broker start and stop. Takes a few minutes:
+
+```bash
+pytest pytest/testbench_test.py --wt-url http://$BENCH:8080 -q -rfEs
+```
+
+With board tests: this flashes the partner slot and takes roughly twice as
+long. The output only appears at the end; follow progress in the bench's
+activity log meanwhile:
+
+```bash
+WT_TEST_PARTNER_IMAGE=/tmp/partner/test-partner-$TARGET \
+  pytest pytest/testbench_test.py --wt-url http://$BENCH:8080 --run-dut -q -rfEs
+curl -s "http://$BENCH:8080/api/log?limit=20" | jq -r '.entries[] | "\(.ts[11:19]) \(.msg)"'
+```
+
+Do not pass `--timeout` unless `pytest-timeout` is installed; pytest refuses to
+start on an unknown flag.
+
+### Reading the results
+
+| Skip reason | Meaning |
+|---|---|
+| `Requires a DUT (use --run-dut)` | Expected without `--run-dut` |
+| `no RTL-SDR dongle available` | No SDR fitted; expected |
+| `no slot answers ping` | No partner running; see §5 |
+| `no chip-detected partner present`, `no present slot to debug` | Expected on a bridge-chip board; on a native-USB board, suspect §7 |
+| `WT-1800 (flash) did not pass` | Knock-on from a WT-1800 failure; fix that first |
+
+Failures that all mention chip detection or `esp_usb_jtag` point to §7.
+
+Not covered by the suite: RF without the optional SDR or signal generator
+fitted, and the AI loop itself (`/define` → `/harness` → `/commission` →
+`/build` on a real project).
+
+## 7. Slot recognition: when the bench points at the wrong USB port
+
+### Symptoms
+
+- Every JTAG and chip-detection test fails: WT-1400–1406, WT-1704–1709,
+  WT-1800, WT-2201/2202/2207, per-slot isolation.
+- `detected_chip` stays `null` for a native-USB board.
+- Starting a debug session by hand fails like this:
+  ```bash
+  curl -s -X POST http://$BENCH:8080/api/debug/start \
+       -H 'Content-Type: application/json' -d "{\"slot\":\"$SLOT\",\"chip\":\"esp32s3\"}"
+  ```
+  ```
+  adapter usb location: 1-1.3
+  Error: esp_usb_jtag: could not find or open device!
+  ```
+- `slots_configured` is larger than the hub you use, and boards on an external
+  hub show up as if they were on the Pi's own ports.
+
+### Diagnose: on the Pi
+
+```bash
+lsusb -t                                            # which bus is the hub on?
+lsusb -d 303a:1001 -v 2>/dev/null | grep -E "^Bus|iSerial"
+udevadm info -q property -n /dev/ttyACM0 | grep -E "ID_PATH=|DEVPATH="
+ls -l /etc/rfc2217/                                 # testbench.json or old workbench.json?
+```
+
+The fault is confirmed when the bus numbers disagree. For example:
+
+```
+Bus 003 Device 007: ID 303a:1001 Espressif USB JTAG/serial debug unit
+DEVPATH=/devices/platform/soc/fe980000.usb/usb3/3-1/3-1.3/3-1.3:1.0/tty/ttyACM0
+ID_PATH=platform-fe980000.usb-usb-0:1.3:1.0
+```
+
+The board is at `3-1.3`, on bus 3. On a Pi 4 that is the USB-C port, `dwc2`,
+so a hub plugged into USB-C triggers it. But OpenOCD was told `1-1.3`.
+
+### Cause
+
+udev's `ID_PATH` writes the USB part as a literal `usb-0:<path>` on every bus.
+Slots were matched against `ID_PATH`, so a board at `3-1.3` landed in the slot
+for `1-1.3` (port 3 of the Pi's own bus-1 hub). The debug code then turned that
+slot back into `adapter usb location 1-1.3`, where nothing is plugged in. The
+device listing for a slot also assumed bus 1.
+
+### Fix
+
+- `pi/usb_slots.py` (new): reads the bus from `DEVPATH`, and matches ports on
+  a boundary, so `1.1` no longer matches `1.10`.
+- `pi/portal.py`: slot matching and `_scan_usb_devices` use it.
+- `pi/rfc2217-learn-slots`: writes the real bus into generated configs.
+- `pi/install.sh`: installs `usb_slots.py`.
+- `pytest/host/test_usb_slots.py`: host tests built from the paths above.
+
+Configs written by the old `rfc2217-learn-slots` (every prefix `0:…`) keep the
+old matching, so pinned slots on existing benches do not move. If such a
+config has a hub off bus 1, regenerate it with `sudo rfc2217-learn-slots`.
+
+### Deploy a portal change to the Pi
+
+Nothing is built on GitHub for the bench: it is Python, copied into
+`/usr/local/bin`. `install.sh --update` copies from the Pi's **local clone**,
+so if that clone is not on the branch with the change, it reinstalls the old
+code and the portal keeps running it.
+
+With git, in the Pi's clone:
+
+```bash
+git status                      # must be clean, or checkout refuses to switch
+git fetch <repo-url> <branch> && git checkout -B <branch> FETCH_HEAD
+git log --oneline -1            # must show the commit you expect
+cd pi && sudo bash install.sh --update
+sudo systemctl restart rfc2217-portal
+```
+
+Or fetch just the changed files, which avoids the clone entirely:
+
+```bash
+RAW=https://raw.githubusercontent.com/<owner>/<repo>/<branch>/pi
+cd /tmp
+for f in portal.py usb_slots.py rfc2217-learn-slots; do curl -fsSLO $RAW/$f; done
+sudo cp portal.py /usr/local/bin/rfc2217-portal
+sudo cp usb_slots.py rfc2217-learn-slots /usr/local/bin/
+sudo chmod +x /usr/local/bin/rfc2217-learn-slots
+sudo systemctl restart rfc2217-portal
+```
+
+Either way, prove what is running: `md5sum /usr/local/bin/rfc2217-portal`
+on the Pi must equal `md5sum pi/portal.py` in your checkout of that branch.
+
+### Verify
+
+```bash
+curl -s http://$BENCH:8080/api/devices | \
+  jq -r '.slots[] | select(.present) | "\(.label) \(.devnode) \(.detected_chip) \(.usb_devices)"'
+```
+
+A native-USB board on the external hub now has a `detected_chip` and a
+`usb_devices` entry (`303a:1001`), and sits in a slot of its own hub.
+
+**Slot numbers change after the fix:** on a Pi 4 with a hub on USB-C, SLOT1–4
+are the Pi's own USB-A ports and SLOT5–8 are the hub. Update anything that
+hard-codes a slot label or port.

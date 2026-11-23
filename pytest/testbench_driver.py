@@ -299,7 +299,9 @@ class TestbenchDriver:
         args = {"ssid": ssid, "timeout": timeout}
         if password:
             args["pass"] = password
-        result = self._api_post("/api/wifi/sta_join", args, timeout=timeout + 10)
+        # Room for one recovery: a wedged radio costs a driver reload
+        # (~15 s) and a second attempt before the bench answers.
+        result = self._api_post("/api/wifi/sta_join", args, timeout=2 * timeout + 45)
         return {k: v for k, v in result.items() if k != "ok"}
 
     def sta_leave(self) -> None:

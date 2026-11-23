@@ -395,8 +395,22 @@ the firmware's own handshake and WPA3 handling) removed again, a reload
 followed by the tests' AP → station switch still joined. So the option is
 not needed, and is best left out, since it costs the Pi WPA3.
 
+**The bench now does this itself.** When a station join fails with exactly
+that line, the bench reloads the driver once and joins again (only for
+`brcmfmac`; set `WIFI_STA_RADIO_RELOAD=0` in the portal's environment to turn
+it off). Each time it does, it:
+
+- adds a warning to the activity log,
+- adds an entry to `radio_reloads` in `/api/wifi/ping`, with the system uptime
+  and the number of joins since the portal started, and
+- saves the wpa_supplicant log and the driver's `dmesg` lines to
+  `/tmp/wifi-tester/radio-reload-N.log` on the Pi.
+
+So a run that passes may still have hit the fault: check `radio_reloads`.
+
 Still open: what puts the radio into that state. Candidates are long uptime
-or many AP ↔ station switches. When it recurs, capture before reloading:
+or many AP ↔ station switches; the `radio_reloads` entries are meant to show
+which. When it recurs, also capture:
 
 1. `wpa_supplicant -dd` output for one attempt (the bench's config is
    `/tmp/wifi-tester/wpa_supplicant.conf`), and `dmesg | grep brcmf` right

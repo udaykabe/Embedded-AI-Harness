@@ -555,7 +555,7 @@ def handle_lease_event(action, mac, ip, hostname=""):
 
 def sta_join(ssid, password="", timeout=15, _internal=False):
     """Join a WiFi network as a station. Returns dict with ip, gateway."""
-    global _sta_active, _sta_ssid, _sta_wpa_proc, _saved_ap
+    global _sta_active, _sta_ssid, _sta_wpa_proc, _saved_ap, _sta_join_attempts
 
     if not _internal:
         _check_wifi_testing_mode()
@@ -601,38 +601,27 @@ def sta_join(ssid, password="", timeout=15, _internal=False):
         with open(WPA_CONF, "w") as f:
             f.write(wpa_conf_content)
 
-        # Start wpa_supplicant
-        _sta_wpa_proc = subprocess.Popen(
-            [
-                "wpa_supplicant",
-                "-i", WLAN_IF,
-                "-c", WPA_CONF,
-                "-B",  # background
-                "-f", WPA_LOG,
-            ],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        )
-        _sta_wpa_proc.wait(timeout=5)
+        _sta_join_attempts += 1
+        log_offset = _file_size(WPA_LOG)
+        connected = _sta_associate_unlocked(timeout)
 
-        # Wait for connection with polling
-        deadline = time.monotonic() + timeout
-        connected = False
-        while time.monotonic() < deadline:
-            try:
-                result = subprocess.run(
-                    ["wpa_cli", "-i", WLAN_IF, "status"],
-                    capture_output=True, text=True, timeout=3, check=False,
-                )
-                if "wpa_state=COMPLETED" in result.stdout:
-                    connected = True
-                    break
-            except Exception:
-                pass
-            time.sleep(0.5)
+        # A Pi's built-in radio can wedge so that every join times out in the
+        # driver itself, and stays that way until its driver is reloaded (see
+        # the runbook, §8). Reload it once and try again, and say so: a
+        # silent recovery would hide the fault we still need to explain.
+        radio_reloaded = False
+        if not connected and STA_RADIO_RELOAD:
+            driver = _wlan_driver()
+            if needs_radio_reload(_read_from(WPA_LOG, log_offset), driver):
+                _sta_stop_unlocked()
+                radio_reloaded = True
+                connected = _reload_radio_and_retry_unlocked(ssid, driver, timeout)
 
         if not connected:
             _sta_stop_unlocked()
-            raise RuntimeError(f"Failed to connect to '{ssid}' within {timeout}s")
+            raise RuntimeError(f"Failed to connect to '{ssid}' within {timeout}s"
+                               + (" (also after reloading the radio driver)"
+                                  if radio_reloaded else ""))
 
         # Get IP via DHCP — try dhcpcd (Debian/Bookworm), dhclient, udhcpc
         # dhcpcd on Bookworm runs as a system daemon; -1 sends a control
@@ -703,7 +692,170 @@ def sta_join(ssid, password="", timeout=15, _internal=False):
         _sta_active = True
         _sta_ssid = ssid
         logger.info("STA joined: ssid=%s ip=%s gw=%s", ssid, ip_addr, gateway)
-        return {"ip": ip_addr, "gateway": gateway}
+        result = {"ip": ip_addr, "gateway": gateway}
+        if radio_reloaded:
+            result["radio_reloaded"] = True
+        return result
+
+
+# ---------------------------------------------------------------------------
+# STA Mode: recovering a wedged radio
+# ---------------------------------------------------------------------------
+
+# Set WIFI_STA_RADIO_RELOAD=0 to turn the recovery off, e.g. to reproduce the
+# fault on purpose.
+STA_RADIO_RELOAD = os.environ.get("WIFI_STA_RADIO_RELOAD", "1") != "0"
+
+# Drivers the reload has been shown to cure. Others are left alone: reloading
+# a driver that is not wedged only costs time and hides a different fault.
+RELOADABLE_DRIVERS = {"brcmfmac"}
+
+# The driver giving up on authentication by itself: no reply was ever heard,
+# so no BSSID is named. A genuine rejection from an AP names the AP.
+_WEDGED_RE = re.compile(
+    r"CTRL-EVENT-ASSOC-REJECT bssid=00:00:00:00:00:00 status_code=16\b")
+
+_sta_join_attempts = 0        # since the portal started
+_radio_reloads = []           # one record per reload, newest last
+_RADIO_RELOADS_KEPT = 20
+
+
+def needs_radio_reload(wpa_log_text, driver):
+    """True when a failed join looks like the wedged radio, not a bad network."""
+    return driver in RELOADABLE_DRIVERS and bool(_WEDGED_RE.search(wpa_log_text or ""))
+
+
+def _file_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _read_from(path, offset):
+    """What a log gained since `offset`: wpa_supplicant -f appends."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(offset)
+            return f.read().decode(errors="replace")
+    except OSError:
+        return ""
+
+
+def _wlan_driver():
+    """Kernel module behind WLAN_IF, e.g. 'brcmfmac'; '' if unknown."""
+    try:
+        return os.path.basename(
+            os.readlink(f"/sys/class/net/{WLAN_IF}/device/driver/module"))
+    except OSError:
+        return ""
+
+
+def _system_uptime_s():
+    try:
+        with open("/proc/uptime") as f:
+            return int(float(f.read().split()[0]))
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _sta_start_supplicant_unlocked():
+    global _sta_wpa_proc
+    _sta_wpa_proc = subprocess.Popen(
+        [
+            "wpa_supplicant",
+            "-i", WLAN_IF,
+            "-c", WPA_CONF,
+            "-B",  # background
+            "-f", WPA_LOG,
+        ],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+    _sta_wpa_proc.wait(timeout=5)
+
+
+def _sta_associate_unlocked(timeout):
+    """Start wpa_supplicant on WPA_CONF and wait for it to complete."""
+    _sta_start_supplicant_unlocked()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            result = subprocess.run(
+                ["wpa_cli", "-i", WLAN_IF, "status"],
+                capture_output=True, text=True, timeout=3, check=False,
+            )
+            if "wpa_state=COMPLETED" in result.stdout:
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def _reload_driver(driver):
+    """Unload and reload `driver` and the modules that hold it."""
+    try:
+        holders = sorted(os.listdir(f"/sys/module/{driver}/holders"))
+    except OSError:
+        holders = []
+    # Holders first: modprobe -r refuses a module something still uses.
+    _run(["modprobe", "-r", *holders, driver], timeout=30, check=False)
+    time.sleep(2)
+    _run(["modprobe", driver], timeout=30, check=False)
+    for h in holders:
+        _run(["modprobe", h], timeout=30, check=False)
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        if os.path.exists(f"/sys/class/net/{WLAN_IF}"):
+            time.sleep(3)          # let the firmware finish coming up
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _reload_radio_and_retry_unlocked(ssid, driver, timeout):
+    """Reload a wedged radio's driver and join once more. Returns connected."""
+    n = len(_radio_reloads) + 1
+    uptime = _system_uptime_s()
+    logger.warning(
+        "STA join to '%s' timed out in the driver (status 16): reloading %s "
+        "(reload #%d since portal start; system uptime %ss; %d joins since "
+        "portal start)", ssid, driver, n, uptime, _sta_join_attempts)
+
+    # Keep what the next investigation needs, before the reload wipes it.
+    evidence = os.path.join(WORK_DIR, f"radio-reload-{n}.log")
+    try:
+        dmesg = _run(["dmesg"], timeout=10, check=False)
+        brcmf = "\n".join(l for l in dmesg.splitlines() if driver in l)
+        with open(evidence, "w") as f:
+            f.write(f"ssid={ssid} driver={driver} uptime_s={uptime} "
+                    f"joins_since_portal_start={_sta_join_attempts}\n\n")
+            f.write("--- wpa_supplicant.log (tail) ---\n" + _tail(WPA_LOG, 4000))
+            f.write(f"\n\n--- dmesg | grep {driver} (tail) ---\n"
+                    + "\n".join(brcmf.splitlines()[-40:]) + "\n")
+    except Exception as exc:
+        logger.warning("Could not save radio-reload evidence: %s", exc)
+        evidence = None
+
+    came_back = _reload_driver(driver)
+    connected = False
+    if came_back:
+        _release_wlan()
+        _flush_addr()
+        _run(["ip", "link", "set", WLAN_IF, "up"], check=False)
+        connected = _sta_associate_unlocked(timeout)
+    else:
+        logger.error("%s did not reappear after reloading %s", WLAN_IF, driver)
+
+    _radio_reloads.append({
+        "at": int(time.time()), "ssid": ssid, "driver": driver,
+        "system_uptime_s": uptime, "joins_since_portal_start": _sta_join_attempts,
+        "recovered": connected, "evidence": evidence,
+    })
+    del _radio_reloads[:-_RADIO_RELOADS_KEPT]
+    logger.warning("Radio reload #%d %s", n,
+                   "recovered the join" if connected else "did NOT recover the join")
+    return connected
 
 
 def sta_leave():
@@ -985,6 +1137,8 @@ def ping():
     return {
         "fw_version": VERSION,
         "uptime": int(time.monotonic() - _start_time),
+        "sta_joins": _sta_join_attempts,
+        "radio_reloads": list(_radio_reloads),
     }
 
 

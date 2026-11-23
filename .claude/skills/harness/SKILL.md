@@ -65,7 +65,9 @@ Symptoms that Phase 1 has drifted:
 
 One project, one container — no separate infrastructure. The devcontainer
 already holds the pytest bench tier, TestbenchDriver, discovery, and slot
-config, which is everything the verify job needs (it downloads an artifact and
+config (the driver is the harness's `pytest/testbench_driver.py`,
+`../../../pytest/testbench_driver.py` from this skill's directory, copied into
+the project), which is everything the verify job needs (it downloads an artifact and
 speaks HTTP; it never builds). **Installation is automated; registration is a
 human grant** — a registered runner accepts and executes workflow code that
 then physically drives the bench, a standing outward-facing authority like

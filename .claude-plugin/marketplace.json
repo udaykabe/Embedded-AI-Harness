@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "embedded-ai-harness",
+  "description": "The Embedded AI Harness: AI closed-loop firmware development against a Raspberry Pi testbench.",
+  "owner": {
+    "name": "SensorsIot"
+  },
+  "plugins": [
+    {
+      "name": "embedded-ai-harness",
+      "description": "Define, harness, commission and build ESP32 firmware against a Raspberry Pi testbench.",
+      "source": "./",
+      "category": "development"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "embedded-ai-harness",
+  "version": "1.2.0",
+  "description": "AI Closed-Loop Programming for embedded systems: define, harness, commission and build ESP32 firmware against a Raspberry Pi testbench, with skills for flashing, serial, WiFi, BLE, MQTT, GDB debug, SDR and the signal generator.",
+  "author": {
+    "name": "SensorsIot",
+    "url": "https://github.com/SensorsIot/Embedded-AI-Harness"
+  },
+  "homepage": "https://github.com/SensorsIot/Embedded-AI-Harness/blob/main/docs/Harness-User-Manual.md",
+  "repository": "https://github.com/SensorsIot/Embedded-AI-Harness",
+  "license": "MIT",
+  "keywords": ["esp32", "embedded", "testbench", "raspberry-pi", "closed-loop", "firmware"],
+  "skills": "./.claude/skills/"
+}

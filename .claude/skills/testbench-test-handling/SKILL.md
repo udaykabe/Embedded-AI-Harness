@@ -5,6 +5,12 @@ description: Use this skill when running or writing automated tests against the 
 
 # ESP32 Test Automation
 
+> **Harness paths.** Paths such as `pi/…`, `pytest/…`, `test-firmware/…`,
+> `tools/…` and `docs/Harness-*.md` name files in the harness itself, not in
+> your project. The harness root is three levels up from this skill's
+> directory (`../../../`), both in the harness repository and in the
+> installed `embedded-ai-harness` plugin.
+
 Base URL: `$TESTBENCH_URL` — see Step 0
 
 **The portal and the MQTT broker are always-on infrastructure. A test never
@@ -46,7 +52,7 @@ down. `$BENCH` is not usable either — a container cannot resolve mDNS.
 Discover the bench and export its URL:
 
 ```bash
-export TESTBENCH_URL=$(sudo python3 .claude/skills/esp-idf-handling/discover-testbench.py \
+export TESTBENCH_URL=$(sudo python3 "${CLAUDE_SKILL_DIR}/../esp-idf-handling/discover-testbench.py" \
                          --url --name <bench-hostname>)
 curl -s "$TESTBENCH_URL/api/info"        # confirm before anything else
 ```
@@ -227,7 +233,9 @@ handling and the slot `state` field. For a one-off operation at the prompt, reac
 for the instrument skill and its `curl` instead — the driver is not worth an
 import path. The methods worth knowing are in
 [`references/driver-methods.md`](references/driver-methods.md); the full surface
-is `pytest/testbench_driver.py`.
+is `pytest/testbench_driver.py`. A project takes its own copy of that file
+into its bench tier (beside its `conftest.py`) and keeps it at the version of
+the bench it runs against.
 
 ## Human Interaction
 

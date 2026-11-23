@@ -5,6 +5,12 @@ description: Drive the Embedded AI Harness testbench's RTL-SDR receiver over `/a
 
 # SDR Receiver (`/api/sdr/*`)
 
+> **Harness paths.** Paths such as `pi/…`, `pytest/…`, `test-firmware/…`,
+> `tools/…` and `docs/Harness-*.md` name files in the harness itself, not in
+> your project. The harness root is three levels up from this skill's
+> directory (`../../../`), both in the harness repository and in the
+> installed `embedded-ai-harness` plugin.
+
 The testbench Pi has one RTL2832U dongle behind the `rtl_433` toolchain. Every
 receive operation goes through `/api/sdr/*`. It is the receive-side counterpart
 to the transmit-only `signal-generator` skill — never SSH in to run `rtl_433`

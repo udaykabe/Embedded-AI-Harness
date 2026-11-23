@@ -13,6 +13,12 @@ description: >
 
 # ESP-IDF Handling
 
+> **Harness paths.** Paths such as `pi/…`, `pytest/…`, `test-firmware/…`,
+> `tools/…` and `docs/Harness-*.md` name files in the harness itself, not in
+> your project. The harness root is three levels up from this skill's
+> directory (`../../../`), both in the harness repository and in the
+> installed `embedded-ai-harness` plugin.
+
 Complete lifecycle for ESP-IDF projects — from project creation to flashing
 and monitoring. Automatically adapts to local USB or remote testbench.
 
@@ -27,7 +33,7 @@ curl -s $TESTBENCH_URL/api/info
 - **Response received** → testbench is available, use remote flashing (RFC2217/OTA)
 - **Connection refused / timeout** → try the discovery script:
   ```bash
-  sudo python3 .claude/skills/esp-idf-handling/discover-testbench.py --hosts
+  sudo python3 "${CLAUDE_SKILL_DIR}/discover-testbench.py" --hosts
   ```
 - **Still no response** → no testbench, use local USB flashing
 

@@ -5,6 +5,12 @@ description: Use this skill whenever the testbench Pi itself needs to be built, 
 
 # Setting up and deploying the testbench
 
+> **Harness paths.** Paths such as `pi/…`, `pytest/…`, `test-firmware/…`,
+> `tools/…` and `docs/Harness-*.md` name files in the harness itself, not in
+> your project. The harness root is three levels up from this skill's
+> directory (`../../../`), both in the harness repository and in the
+> installed `embedded-ai-harness` plugin.
+
 The one fact that explains most confusion: **the service runs from
 `/usr/local/bin/`, not from the git checkout.** Editing files in the repo on the
 Pi — or on your laptop — changes nothing until they are copied across and the
@@ -68,7 +74,7 @@ curl -s $TESTBENCH_URL/api/devices   # every slot
 If the bench has moved or you do not know its address:
 
 ```bash
-sudo python3 .claude/skills/esp-idf-handling/discover-testbench.py --hosts
+sudo python3 "${CLAUDE_SKILL_DIR}/../esp-idf-handling/discover-testbench.py" --hosts
 ```
 
 Then prove the subsystems actually loaded, because an import that fails on a

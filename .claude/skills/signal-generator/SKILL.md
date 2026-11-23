@@ -5,6 +5,12 @@ description: Drive the Embedded AI Harness testbench's RF signal generator over 
 
 # Signal Generator (`/api/siggen/*`)
 
+> **Harness paths.** Paths such as `pi/…`, `pytest/…`, `test-firmware/…`,
+> `tools/…` and `docs/Harness-*.md` name files in the harness itself, not in
+> your project. The harness root is three levels up from this skill's
+> directory (`../../../`), both in the harness repository and in the
+> installed `embedded-ai-harness` plugin.
+
 The testbench Pi has one signal-generator service. Two RF sources sit behind it (Si5351 on I²C, BCM2835 GPCLK on GPIO 5/6) and an optional PE4302 step attenuator can sit in the RF path. The endpoint is the same regardless of which backend is active — `/api/siggen/*` is the only entry point you should reach for.
 
 This skill replaces the legacy `cw-beacon` skill, which only knew about GPCLK and led to wrong frequencies on testbenches that have an Si5351.

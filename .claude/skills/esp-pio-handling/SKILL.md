@@ -26,7 +26,7 @@ than the build, read that skill.
 Same as [`esp-idf-handling`](../esp-idf-handling/SKILL.md): if `/api/info`
 answers, use the testbench; if nothing answers, flash over local USB. The
 discovery script is shared —
-`.claude/skills/esp-idf-handling/discover-testbench.py --hosts`.
+`"${CLAUDE_SKILL_DIR}/../esp-idf-handling/discover-testbench.py" --hosts`.
 
 ## Step 2: Build
 
@@ -79,7 +79,7 @@ simply a pointer.
 
 ```bash
 pio run
-python3 .claude/skills/esp-pio-handling/testbench-flash.py \
+python3 "${CLAUDE_SKILL_DIR}/testbench-flash.py" \
   --host <bench>:8080 --slot SLOT3 --chip esp32
 ```
 

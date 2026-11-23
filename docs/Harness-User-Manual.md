@@ -1013,18 +1013,32 @@ curl -X POST http://$BENCH:8080/api/human-interaction \
 
 ### 15.1 Claude Code skills
 
-The repo ships project skills under `.claude/skills/` that teach Claude Code how
-to drive the bench. Install them on each dev machine:
+The skills that teach Claude Code the method and the bench ship as a Claude
+Code plugin, `embedded-ai-harness`. This repository is its marketplace, so
+there is nothing to copy. Install it once per machine, or once per project:
 
 ```bash
-git clone https://github.com/SensorsIot/Embedded-AI-Harness.git /tmp/uew
-mkdir -p .claude/skills
-cp -r /tmp/uew/.claude/skills/. .claude/skills/
-rm -rf /tmp/uew
+claude plugin marketplace add SensorsIot/Embedded-AI-Harness
+claude plugin install embedded-ai-harness@embedded-ai-harness                  # every project on this machine
+claude plugin install embedded-ai-harness@embedded-ai-harness --scope project  # this project only
 ```
 
-`.claude/skills/` is project-scoped; use `~/.claude/skills/` to install globally.
-Claude Code loads skills at session start, so restart your session after copying.
+(The same works inside a session as `/plugin marketplace add …` and
+`/plugin install …`.) Use your fork's `<owner>/Embedded-AI-Harness` instead if
+your bench runs a fork: the skills describe the bench's API, so take them from
+the code the bench runs.
+
+`--scope project` records the plugin in the project's `.claude/settings.json`,
+so everyone who opens the project is offered the same skills. A plugin's
+skills carry its name: `/define` becomes `/embedded-ai-harness:define`.
+
+Update with `claude plugin update embedded-ai-harness`, and restart the
+session: Claude Code loads skills when a session starts.
+
+**Working in this repository itself**, the skills under `.claude/skills/` load
+as project skills without the plugin. The plugin is this repository: its root
+is the plugin root, so paths in the skills such as `../../../docs/…` and
+`test-firmware/…` resolve the same way in both.
 
 | Skill | Covers |
 |-------|--------|

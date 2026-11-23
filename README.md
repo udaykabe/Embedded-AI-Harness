@@ -86,7 +86,7 @@ spec true for the product's whole life.
 |---|---|---|
 | A **Raspberry Pi testbench** (Pi 3/4/5, or Zero 2 W + USB hub + Ethernet adapter) with an ESP32 board in a slot | The loop's hands and eyes — flash, reset, observe on real hardware | Build it: [Quick Start](#-quick-start--building-the-bench) below |
 | A **GitHub account**, `git` + `gh` authenticated | **This is where the firmware is built** — see below | [github.com](https://github.com) |
-| **Claude Code** with this repo's skills | The AI that pulls; the skills are the method | `npm i -g @anthropic-ai/claude-code`, then copy `.claude/skills/` from this repo into your project |
+| **Claude Code** with the `embedded-ai-harness` plugin | The AI that pulls; the skills are the method | `npm i -g @anthropic-ai/claude-code`, then `claude plugin marketplace add SensorsIot/Embedded-AI-Harness` and `claude plugin install embedded-ai-harness@embedded-ai-harness` |
 | **Same LAN** | Your dev machine or devcontainer must reach the bench | `curl http://$BENCH:8080/api/devices` answers |
 
 Throughout this README, **`$BENCH` is the bench's IP address** — never a
@@ -255,7 +255,14 @@ nothing to `pip install`. For Claude Desktop, drag
 onto **Settings → Extensions** and enter your testbench URL.
 
 The AICLP skills (`/define`, `/harness`, `/commission`, `/build`) and the
-instrument skills all live under `.claude/skills/`. Setup for both:
+instrument skills ship as the `embedded-ai-harness` Claude Code plugin; this
+repository is its marketplace:
+
+```
+/plugin install embedded-ai-harness --marketplace SensorsIot/Embedded-AI-Harness
+```
+
+Setup, scopes and updates:
 [User Manual §15](docs/Harness-User-Manual.md#15-driving-the-bench-from-claude).
 
 ## 🩺 Troubleshooting

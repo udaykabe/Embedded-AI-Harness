@@ -14,7 +14,7 @@ down. `$BENCH` is not usable either — a container cannot resolve mDNS.
 Discover the bench and export its URL:
 
 ```bash
-export TESTBENCH_URL=$(sudo python3 .claude/skills/esp-idf-handling/discover-testbench.py \
+export TESTBENCH_URL=$(sudo python3 "${CLAUDE_SKILL_DIR}/../esp-idf-handling/discover-testbench.py" \
                          --url --name <bench-hostname>)
 curl -s "$TESTBENCH_URL/api/info"        # confirm before anything else
 ```

@@ -11,6 +11,12 @@ description: >
 
 # ESP32 Testbench Integration
 
+> **Harness paths.** Paths such as `pi/…`, `pytest/…`, `test-firmware/…`,
+> `tools/…` and `docs/Harness-*.md` name files in the harness itself, not in
+> your project. The harness root is three levels up from this skill's
+> directory (`../../../`), both in the harness repository and in the
+> installed `embedded-ai-harness` plugin.
+
 This is a procedure. When triggered, read the project's existing FSD, integrate
 the firmware with the testbench infrastructure — each module **only when the
 FSD requires it** (UDP logging always; OTA, BLE command handling, provisioning
@@ -61,7 +67,7 @@ Appendix chapters.
 
 ## Template Reference
 
-All template code lives in `Embedded-AI-Harness/test-firmware/`. When adding modules, copy from these templates and customize project-specific values:
+All template code lives in the harness's `test-firmware/` (`../../../test-firmware/` from this skill's directory). When adding modules, copy from these templates and customize project-specific values:
 
 | Module | Template source | Customization |
 |--------|----------------|---------------|

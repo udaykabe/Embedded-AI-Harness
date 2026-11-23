@@ -153,8 +153,11 @@ start on an unknown flag.
 | `no slot answers ping` | No partner running; see §5 |
 | `no chip-detected partner present`, `no present slot to debug` | Expected on a bridge-chip board; on a native-USB board, suspect §7 |
 | `WT-1800 (flash) did not pass` | Knock-on from a WT-1800 failure; fix that first |
+| `the test partner was provisioned but never joined` | The partner cannot hear the bench's AP; see §8 |
 
 Failures that all mention chip detection or `esp_usb_jtag` point to §7.
+Station-mode failures (`sta_join … within 15s`, captive portal, HTTP relay
+via STA) with everything else green point to §8.
 
 Not covered by the suite: RF without the optional SDR or signal generator
 fitted, and the AI loop itself (`/define` → `/harness` → `/commission` →
@@ -265,3 +268,82 @@ A native-USB board on the external hub now has a `detected_chip` and a
 **Slot numbers change after the fix:** on a Pi 4 with a hub on USB-C, SLOT1–4
 are the Pi's own USB-A ports and SLOT5–8 are the hub. Update anything that
 hard-codes a slot label or port.
+
+## 8. WiFi: the bench and the partner cannot hear each other
+
+The bench's AP and the partner both transmit at **5 dBm** on purpose: at a
+few centimetres, full power only drives receivers into compression. That
+leaves little margin, and some benches lose it entirely.
+
+### Symptoms
+
+Either direction can fail on its own.
+
+| Direction | Seen as |
+|---|---|
+| Partner cannot hear the bench | `provisioned but never joined` skips; the partner's log shows `STA disconnect (reason=201)` (no AP found), 20 retries; a phone does not list the bench's AP |
+| Bench cannot hear the partner | `sta_join: Failed to connect to 'WB-Test-Setup'` or `'WT-PARTNER-AP'`; `/tmp/wifi-tester/wpa_supplicant.log` on the Pi shows `CTRL-EVENT-ASSOC-REJECT bssid=00:00:00:00:00:00 status_code=16` (authentication timed out: the partner's replies never arrived) |
+
+`/api/wifi/ap_status` says `active` throughout, and hostapd logs
+`AP-ENABLED`: software reports nothing wrong.
+
+### Measure both directions
+
+Each radio reports what it hears. Neither alone can tell "not transmitting"
+from "not hearing".
+
+```bash
+# Partner -> bench: the bench scans (its AP must be stopped)
+curl -s http://$BENCH:8080/api/wifi/scan | jq '.networks[] | select(.ssid|test("^W[BT]-"))'
+
+# Bench -> partner: start an AP, then ask the partner what it hears.
+# Wait for a fresh "OK scan end": /api/serial/monitor also matches old
+# buffered lines, so poll /api/serial/output with since= instead.
+curl -s -X POST http://$BENCH:8080/api/wifi/ap_start \
+     -H 'Content-Type: application/json' -d '{"ssid":"WT-DIAG","password":"testpass123"}'
+T=$(date +%s)
+curl -s -X POST http://$BENCH:8080/api/serial/write \
+     -H 'Content-Type: application/json' -d "{\"slot\":\"$SLOT\",\"text\":\"scan\"}"
+sleep 5; curl -s "http://$BENCH:8080/api/serial/output?slot=$SLOT&since=$T" | jq -r '.lines[].text'
+```
+
+At bench distance, around -20 to -40 dBm in each direction is healthy. A
+large gap between the two directions means something near one radio is in
+the way.
+
+### Causes found so far
+
+- **A metal enclosure** (for example the DeskPi Pro) encloses the Pi 4's
+  onboard antenna. At 5 dBm the bench's AP did not get out at all. With the
+  Pi out of the case, the partner heard it at -20 dBm.
+- **A USB 3 device beside the Pi's antenna.** USB 3 raises the noise floor
+  across 2.4 GHz. The Pi then still hears strong networks (-13 dBm) but loses
+  a weak partner, in a way that varies with placement. Keep USB 3 devices
+  and cables away from the antenna, or use a USB 2 port.
+- **Placement of the partner.** Its PCB antenna (the zig-zag trace at one end
+  of the module) needs a clear view of the Pi: not against metal, under a
+  hub, or wrapped in cables.
+- **The radio's transmit-power control.** The bench asks for 5 dBm with
+  `iw … set txpower fixed`. Some Pi radios refuse it and keep transmitting at
+  full power; others accept it. On the latter the margin is genuinely 5 dBm.
+  Check with `iw dev wlan0 info | grep txpower`.
+
+### Remedies
+
+- Run the Pi uncased or in a plastic case, and move USB 3 devices away.
+- Raise the bench AP's power: set `WIFI_AP_TXPOWER_MBM` (mBm; 1300 = 13 dBm)
+  in the portal's service environment and restart it.
+- Raise the partner's power, which needs a partner build that has the
+  `txpower` command:
+  ```bash
+  # once, by hand (quarter-dBm: 52 = 13 dBm; stored, survives reboots)
+  curl -s -X POST http://$BENCH:8080/api/serial/write \
+       -H 'Content-Type: application/json' -d "{\"slot\":\"$SLOT\",\"text\":\"txpower 52\"}"
+  # or on every suite run
+  WT_TEST_PARTNER_TXPOWER=52 pytest pytest/testbench_test.py ...
+  ```
+  `txpower` alone reports the current setting; `txpower default` removes the
+  override.
+
+If the partner's AP is visible to a phone across the room but not to the Pi
+next to it, the problem is at the Pi, not the partner.

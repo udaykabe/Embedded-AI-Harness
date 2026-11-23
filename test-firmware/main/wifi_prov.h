@@ -24,3 +24,12 @@ void wifi_prov_get_ip(char *out, size_t out_sz);
 
 /* Station MAC as "aa:bb:cc:dd:ee:ff". */
 void wifi_prov_get_mac(char *out, size_t out_sz);
+
+/* Transmit power, quarter-dBm. The range is esp_wifi's (2..20 dBm). Setting
+ * stores an override that survives reboots and applies it at once; clearing
+ * returns to the built-in default. Driven by the console's `txpower`. */
+#define WIFI_PROV_TXPOWER_MIN  8
+#define WIFI_PROV_TXPOWER_MAX  84
+int       wifi_prov_txpower_default(void);
+esp_err_t wifi_prov_set_txpower(int qdbm);
+esp_err_t wifi_prov_clear_txpower(void);

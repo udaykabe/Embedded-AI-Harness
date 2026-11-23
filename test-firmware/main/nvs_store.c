@@ -136,3 +136,36 @@ esp_err_t nvs_store_erase_wifi(void)
     ESP_LOGI(TAG, "WiFi credentials erased");
     return err;
 }
+
+esp_err_t nvs_store_set_txpower(int8_t qdbm)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_i8(h, "tx_qdbm", qdbm);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "tx power override saved: %d (%.2f dBm)", qdbm, qdbm / 4.0);
+    return err;
+}
+
+bool nvs_store_get_txpower(int8_t *qdbm)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return false;
+    esp_err_t err = nvs_get_i8(h, "tx_qdbm", qdbm);
+    nvs_close(h);
+    return err == ESP_OK;
+}
+
+esp_err_t nvs_store_clear_txpower(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    nvs_erase_key(h, "tx_qdbm");
+    err = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "tx power override cleared");
+    return err;
+}

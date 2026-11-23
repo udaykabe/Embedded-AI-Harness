@@ -2,6 +2,7 @@
 
 #include "esp_err.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 esp_err_t nvs_store_init(void);
 esp_err_t nvs_store_set_wifi(const char *ssid, const char *password);
@@ -32,3 +33,18 @@ esp_err_t nvs_store_clear_test_ap(void);
  * the bench itself. */
 esp_err_t nvs_store_set_broker(const char *uri);
 bool      nvs_store_get_broker(char *uri, size_t uri_len);
+
+/* A transmit-power override, in esp_wifi's quarter-dBm units (8..84).
+ *
+ * The default is deliberately low (see wifi_prov.c). Some benches cannot
+ * hear it: a Pi in a metal enclosure, or with a USB 3 device beside its
+ * antenna, loses a 5 dBm partner entirely while hearing ordinary networks
+ * fine. This lets such a bench turn the partner up without a rebuild.
+ *
+ * Stored, because provisioning reboots the board and an override that did
+ * not survive that would be gone before the first test used it. Not
+ * touched by `forget` or by new credentials: it describes the bench the
+ * board sits on, not the network it joins. */
+esp_err_t nvs_store_set_txpower(int8_t qdbm);
+bool      nvs_store_get_txpower(int8_t *qdbm);
+esp_err_t nvs_store_clear_txpower(void);

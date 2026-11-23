@@ -32,14 +32,47 @@ static const char *TAG = "wifi_prov";
  * down, which is 40 dB of margin over the noise floor. */
 #define TX_POWER_QDBM  20
 
+/* The default is a choice about a quiet bench, not a property of every one.
+ * A Pi in a metal enclosure, or with a USB 3 device beside its antenna, was
+ * observed hearing ordinary networks at -13 dBm and this partner not at all:
+ * its station timed out authenticating (status 16) while a phone across the
+ * room joined fine. `txpower <qdbm>` on the console stores an override for
+ * such a bench (nvs_store_set_txpower); `txpower default` removes it. */
+static int8_t tx_power_qdbm(void)
+{
+    int8_t q;
+    return nvs_store_get_txpower(&q) ? q : TX_POWER_QDBM;
+}
+
 static void set_low_tx_power(void)
 {
     /* Must follow esp_wifi_start(): the setting does not survive a stopped
      * radio, and applying it earlier is silently discarded. */
-    esp_wifi_set_max_tx_power(TX_POWER_QDBM);
+    esp_wifi_set_max_tx_power(tx_power_qdbm());
     int8_t got = 0;
     esp_wifi_get_max_tx_power(&got);
     ESP_LOGI(TAG, "tx power set to %d (%.2f dBm)", got, got / 4.0);
+}
+
+int wifi_prov_txpower_default(void)
+{
+    return TX_POWER_QDBM;
+}
+
+esp_err_t wifi_prov_set_txpower(int qdbm)
+{
+    if (qdbm < WIFI_PROV_TXPOWER_MIN || qdbm > WIFI_PROV_TXPOWER_MAX)
+        return ESP_ERR_INVALID_ARG;
+    esp_err_t err = nvs_store_set_txpower((int8_t)qdbm);
+    if (err == ESP_OK) set_low_tx_power();   /* takes effect now, too */
+    return err;
+}
+
+esp_err_t wifi_prov_clear_txpower(void)
+{
+    esp_err_t err = nvs_store_clear_txpower();
+    if (err == ESP_OK) set_low_tx_power();
+    return err;
 }
 
 extern const char portal_html_start[] asm("_binary_portal_html_start");

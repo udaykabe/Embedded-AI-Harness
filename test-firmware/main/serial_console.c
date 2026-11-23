@@ -122,6 +122,43 @@ static void cmd_testap(char *rest)
     esp_restart();
 }
 
+/* `txpower`            -> report the power in use, the default, any override
+ * `txpower <qdbm>`     -> store an override (8..84) and apply it now
+ * `txpower default`    -> remove the override
+ * Quarter-dBm, as esp_wifi takes it: 52 = 13 dBm. */
+static void cmd_txpower(char *rest)
+{
+    while (*rest == ' ') rest++;
+    if (*rest) {
+        esp_err_t err;
+        if (!strcmp(rest, "default")) {
+            err = wifi_prov_clear_txpower();
+        } else {
+            char *end = NULL;
+            long q = strtol(rest, &end, 10);
+            if (end == rest || *end != '\0' ||
+                q < WIFI_PROV_TXPOWER_MIN || q > WIFI_PROV_TXPOWER_MAX) {
+                reply("ERR txpower needs %d..%d (quarter-dBm) or 'default'",
+                      WIFI_PROV_TXPOWER_MIN, WIFI_PROV_TXPOWER_MAX);
+                return;
+            }
+            err = wifi_prov_set_txpower((int)q);
+        }
+        if (err != ESP_OK) {
+            reply("ERR txpower not saved: %s", esp_err_to_name(err));
+            return;
+        }
+    }
+    int8_t now = 0, stored = 0;
+    esp_wifi_get_max_tx_power(&now);
+    bool has = nvs_store_get_txpower(&stored);
+    char ov[16];
+    if (has) snprintf(ov, sizeof ov, "%d", stored);
+    else     snprintf(ov, sizeof ov, "none");
+    reply("OK txpower now=%d(%.2fdBm) default=%d override=%s",
+          now, now / 4.0, wifi_prov_txpower_default(), ov);
+}
+
 static void handle_line(char *line)
 {
     while (*line == ' ') line++;
@@ -185,6 +222,8 @@ static void handle_line(char *line)
         cmd_wifi(rest);
     } else if (!strcmp(line, "testap")) {
         cmd_testap(rest);
+    } else if (!strcmp(line, "txpower")) {
+        cmd_txpower(rest);
     } else if (!strcmp(line, "forget")) {
         nvs_store_erase_wifi();
         reply("OK forget — rebooting into the provisioning portal");
@@ -198,7 +237,7 @@ static void handle_line(char *line)
         /* Name what was not understood. A bare "ERR" tells a caller nothing
            about whether it mistyped or is talking to the wrong device. */
         reply("ERR unknown command '%s' — try "
-              "ping|status|scan|info|mark|wifi|testap|forget|reboot", line);
+              "ping|status|scan|info|mark|wifi|testap|txpower|forget|reboot", line);
     }
 }
 
@@ -241,6 +280,6 @@ esp_err_t serial_console_init(void)
     }
     xTaskCreate(console_task, "console", 4096, NULL, 5, NULL);
     ESP_LOGI(TAG, "serial console ready — "
-                  "ping|status|scan|info|mark|wifi|testap|forget|reboot");
+                  "ping|status|scan|info|mark|wifi|testap|txpower|forget|reboot");
     return ESP_OK;
 }

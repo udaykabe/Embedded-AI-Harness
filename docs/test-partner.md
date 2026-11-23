@@ -173,7 +173,8 @@ and the silicon provide; 16 need the radio in one direction or the other;
 | Captive portal — hosts an AP, takes credentials, reboots into STA | rows 3, 5, 10 | built |
 | HTTP server on `:8080` (`/status`, `/ota`, `/wifi-reset`) | row 5 | built |
 | Heartbeat on serial, every 10 s | rows 14, 15 | built |
-| **Serial console** — `ping`, `status`, `scan`, `info`, `mark`, `wifi`, `testap`, `forget`, `reboot` | row 18, and provisioning without the radio | built |
+| **Serial console** — `ping`, `status`, `scan`, `info`, `mark`, `wifi`, `testap`, `txpower`, `forget`, `reboot` | row 18, and provisioning without the radio | built |
+| **`txpower`** — report, override (stored, survives reboots) or reset the 5 dBm default; quarter-dBm, `txpower 52` = 13 dBm. The suite sends it from `WT_TEST_PARTNER_TXPOWER` | a bench that cannot hear 5 dBm: a Pi in a metal case, or a USB 3 device beside its antenna | built |
 | **`scan`** — the partner's own view of the air | telling a deaf receiver from a silent AP | built |
 | **`testap`** — a WPA2 AP of a given name, on request | row 4: the bench cannot be the AP its own station tests join | built |
 | Built-in USB-JTAG (a property of the part, not the firmware) | rows 11, 12, 13 | inherent |

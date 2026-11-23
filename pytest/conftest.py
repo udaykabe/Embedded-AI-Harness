@@ -114,6 +114,11 @@ TEST_PARTNER_HTTP_PORT = 8080           # its own server, not the portal's
 # and the `flash_args` that names their offsets, exactly as CI publishes it.
 TEST_PARTNER_IMAGE_ENV = "WT_TEST_PARTNER_IMAGE"
 
+# Partner transmit power, quarter-dBm (52 = 13 dBm). Unset leaves the
+# partner as it is. For a bench that cannot hear the partner's 5 dBm default:
+# a metal enclosure, or a USB 3 device beside the Pi's antenna.
+TEST_PARTNER_TXPOWER_ENV = "WT_TEST_PARTNER_TXPOWER"
+
 
 def _dut_answers(testbench, slot, timeout=6.0) -> bool:
     """Does this slot's device answer the test partner console?"""
@@ -202,6 +207,34 @@ def ensure_test_partner_firmware(testbench):
     return None
 
 
+def apply_test_partner_txpower(testbench):
+    """Send `txpower <WT_TEST_PARTNER_TXPOWER>` to the partner, if set.
+
+    Returns what happened, or None when the variable is unset. Never raises:
+    a partner built before the command existed answers "ERR unknown command",
+    and that must read as "update the partner", not as a failed suite.
+    """
+    want = os.environ.get(TEST_PARTNER_TXPOWER_ENV)
+    if not want:
+        return None
+    for dev in testbench.get_devices():
+        if not dev.get("present") or not _dut_answers(testbench, dev["label"]):
+            continue
+        slot = dev["label"]
+        since = time.time()
+        testbench.serial_write(slot, text=f"txpower {want}")
+        deadline = time.time() + 6
+        while time.time() < deadline:
+            for ln in testbench.serial_output(slot, lines=200,
+                                              since=since).get("lines", []):
+                text = ln.get("text", "")
+                if text.startswith(("OK txpower", "ERR")):
+                    return f"{slot}: {text}"
+            time.sleep(0.5)
+        return f"{slot}: no answer to 'txpower {want}'"
+    return "no partner answered the console"
+
+
 @pytest.fixture(scope="session")
 def _test_partner_session(testbench):
     """Provision the test partner onto a fresh AP, once per run.
@@ -216,6 +249,9 @@ def _test_partner_session(testbench):
     test that asserts on project firmware goes red when that project ships,
     which is the dependency backwards.
     """
+    txp = apply_test_partner_txpower(testbench)
+    if txp:
+        print(f"[test partner] {TEST_PARTNER_TXPOWER_ENV}: {txp}", flush=True)
     ssid = f"WT-{uuid.uuid4().hex[:6].upper()}"
     password = "testpass123"
     testbench.drain_events()

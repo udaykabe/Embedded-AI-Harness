@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
 import debug_controller
+import usb_slots
 import gpiod
 import mqtt_controller
 import netscan_controller
@@ -607,22 +608,26 @@ def load_config(path: str) -> dict[str, dict]:
     return result
 
 
-def _find_fixed_slot_for_key(slot_key: str) -> dict | None:
-    """Match a USB slot_key against configured prefix patterns.
+def _find_fixed_slot_for_key(slot_key: str, devpath: str = "") -> dict | None:
+    """Match a USB device against configured prefix patterns.
 
-    Returns the fixed slot dict whose prefix matches, or None.
-    Longer prefixes checked first. The fixed slot always stays in the
-    dict under its placeholder key — multiple slot_keys can map to it.
+    Returns the fixed slot dict whose prefix matches, or None. The fixed slot
+    always stays in the dict under its placeholder key — multiple slot_keys
+    can map to it.
+
+    The bus is read from `devpath`. `slot_key` is usually an ID_PATH, which
+    spells every bus as "usb-0:", so matching on it alone put a board on
+    3-1.3 into the slot for 1-1.3 (see usb_slots).
     """
-    candidates = sorted(_global_config.get("slot_prefixes", []),
-                        key=lambda sp: len(sp.get("prefix", "")),
-                        reverse=True)
-    for sp in candidates:
-        prefix = sp.get("prefix")
-        if prefix and prefix in slot_key:
-            pk = sp["placeholder_key"]
-            if pk in slots:
-                return slots[pk]
+    by_prefix = {sp.get("prefix"): sp["placeholder_key"]
+                 for sp in _global_config.get("slot_prefixes", [])
+                 if sp.get("prefix")}
+    prefix = usb_slots.match_prefix(by_prefix, devpath=devpath,
+                                    id_path=slot_key)
+    if prefix:
+        pk = by_prefix[prefix]
+        if pk in slots:
+            return slots[pk]
     return None
 
 
@@ -1036,7 +1041,7 @@ def scan_existing_devices():
             print(f"[portal] boot scan: no slot_key for {devnode}, skipping", flush=True)
             continue
 
-        fixed = _find_fixed_slot_for_key(slot_key)
+        fixed = _find_fixed_slot_for_key(slot_key, devpath)
         if fixed:
             slot = fixed
         elif slot_key not in slots:
@@ -1188,17 +1193,16 @@ def _scan_usb_devices(slot: dict) -> list[dict]:
     """Scan sysfs for USB devices matching this slot's USB prefix.
 
     Returns list of {product, vid_pid} for non-serial USB devices (e.g. HID).
-    Slot prefix "0:1.1" maps to sysfs path "1-1.1*".
+    Slot prefix "2:1.1" maps to sysfs path "3-1.1*" (kernel bus = B + 1).
     """
     prefix = slot.get("_usb_prefix")
     if not prefix:
         return []
-    # Convert slot prefix "0:1.1" → sysfs glob "1-1.1*"
-    # prefix format: "0:1.X" or "0:1.X.Y"
-    parts = prefix.split(":")  # ["0", "1.1"]
-    if len(parts) != 2:
+    # Slot prefix "B:P" → sysfs glob "<B+1>-P*" ("2:1.3" → "3-1.3*"). This
+    # used to assume bus 1, so a slot on any other bus listed nothing.
+    sysfs_pattern = usb_slots.sysfs_name(prefix)
+    if not sysfs_pattern:
         return []
-    sysfs_pattern = f"1-{parts[1]}"
     sysfs_base = "/sys/bus/usb/devices"
     devices = []
     import glob as _glob
@@ -2997,7 +3001,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         # Look up slot — match against fixed slot prefixes first
-        fixed = _find_fixed_slot_for_key(slot_key)
+        fixed = _find_fixed_slot_for_key(slot_key, devpath)
         if fixed:
             slot = fixed
         elif slot_key not in slots:

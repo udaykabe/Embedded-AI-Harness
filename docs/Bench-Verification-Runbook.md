@@ -316,17 +316,25 @@ the way.
 - **A metal enclosure** (for example the DeskPi Pro) encloses the Pi 4's
   onboard antenna. At 5 dBm the bench's AP did not get out at all. With the
   Pi out of the case, the partner heard it at -20 dBm.
-- **A USB 3 device beside the Pi's antenna.** USB 3 raises the noise floor
-  across 2.4 GHz. The Pi then still hears strong networks (-13 dBm) but loses
-  a weak partner, in a way that varies with placement. Keep USB 3 devices
-  and cables away from the antenna, or use a USB 2 port.
+- **The partner's power supply.** Fed from an enclosure's front-panel hub,
+  the partner reported its AP up (`status` → `ap_mode=1`) and still heard
+  other networks, but its AP came and went for the Pi and a phone alike.
+  Powered on its own and plugged into one of the Pi's own ports, it held
+  -28 to -30 dBm at the Pi. A board that receives but stops transmitting
+  points at its supply first.
 - **Placement of the partner.** Its PCB antenna (the zig-zag trace at one end
   of the module) needs a clear view of the Pi: not against metal, under a
   hub, or wrapped in cables.
 - **The radio's transmit-power control.** The bench asks for 5 dBm with
   `iw … set txpower fixed`. Some Pi radios refuse it and keep transmitting at
-  full power; others accept it. On the latter the margin is genuinely 5 dBm.
-  Check with `iw dev wlan0 info | grep txpower`.
+  full power; others accept it. On the latter the margin is genuinely 5 dBm,
+  and the setting **outlives AP mode**: `iw dev` showed a station-mode
+  `wlan0` still at 5 dBm. Check with `iw dev wlan0 info | grep txpower`.
+- **Suspected, not confirmed: a USB 3 device beside the Pi's antenna.** USB 3
+  is a known 2.4 GHz noise source. The Pi kept hearing strong networks
+  (-13 dBm) while losing a weak partner, which fits, but the partner's power
+  supply turned out to explain most of it. If a USB 3 device sits near the
+  antenna, try a USB 2 port or more distance.
 
 ### Remedies
 
@@ -347,3 +355,37 @@ the way.
 
 If the partner's AP is visible to a phone across the room but not to the Pi
 next to it, the problem is at the Pi, not the partner.
+
+### Open issue: the bench as a station times out authenticating
+
+Seen on a Pi 4 (Broadcom `brcmfmac`). With both directions measured healthy
+(partner → Pi -30 dBm, Pi → partner -20 dBm), the Pi still could not join the
+partner's open portal, while a phone joined it at once:
+
+```
+wlan0: Trying to associate with <partner-ap-mac> (SSID='WB-Test-Setup' freq=2412 MHz)
+wlan0: CTRL-EVENT-ASSOC-REJECT bssid=00:00:00:00:00:00 status_code=16
+```
+
+The all-zeros BSSID means the Pi's own driver gave up: status 16 is an
+authentication timeout, a request with no reply heard. The partner logged no
+attempt at all.
+
+Ruled out: signal (above), the Pi's transmit power (also failed at 31 dBm),
+a leftover `hostapd` (none running), a second interface (only `wlan0`, type
+managed, right channel), and the regulatory domain (`country CH`, channel 1
+allowed). The same tests passed earlier on the same bench, so the fault is
+intermittent rather than permanent.
+
+Not yet tried, in order:
+
+1. A clean boot, then a station join **before** the bench raises any AP, to
+   test whether the AP → station switch is what breaks it.
+2. `sudo modprobe -r brcmfmac && sudo modprobe brcmfmac`, then the join.
+3. `wpa_supplicant -dd` output for one attempt (the bench's config is
+   `/tmp/wifi-tester/wpa_supplicant.conf`), and `dmesg | grep brcmf` right
+   after it.
+
+Until it is resolved, expect these to fail on an affected bench and read them
+as this issue: WT-401, WT-404, WT-405, WT-506 (HTTP via STA), and the captive
+portal tests WT-2101, WT-2103, WT-2104.

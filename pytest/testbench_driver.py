@@ -745,7 +745,10 @@ class TestbenchDriver:
         body = {}
         if slot:
             body["slot"] = slot
-        return self._api_post("/api/debug/stop", body)
+        # The stop resumes the chip over JTAG, kills OpenOCD and then reboots
+        # the board over DTR/RTS so it does not come up halted for a debugger
+        # that has gone. That takes over 10 s, the default this used to get.
+        return self._api_post("/api/debug/stop", body, timeout=45)
 
     def debug_status(self) -> dict:
         """Get debug state for all slots."""

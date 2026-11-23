@@ -1370,6 +1370,36 @@ def _read_serial_lines(ser, pattern: str | None, timeout: float) -> tuple[list[s
     return lines, None
 
 
+def _reboot_after_debug(slot: dict, label: str) -> None:
+    """Reset a board over DTR/RTS once its debug session has gone.
+
+    debug_controller.stop() sends `reset run` and then kills OpenOCD, so the
+    chip restarts with the debugger still attached. ESP-IDF's panic handler
+    is OCD-aware: a fault during that boot (observed: "Cache error", then
+    "StoreProhibited") prints "Setting breakpoint at 0x… and returning" and
+    halts for a debugger — which is gone a second later. The board then sat
+    silent until something reset it, and every later test on the slot failed:
+    debug_stop timed out, chip detection failed, a flash got "Write timeout".
+
+    A DTR/RTS reset with OpenOCD gone boots the chip with no debugger
+    attached; on the observed board it came straight back. Best effort: a
+    failure is logged, never raised, because stopping the session already
+    succeeded and is what the caller asked for.
+    """
+    if not slot.get("present"):
+        return
+    try:
+        r = serial_reset(slot)
+        if r.get("ok"):
+            log_activity(f"{label}: rebooted after debug stop", "info")
+        else:
+            log_activity(f"{label}: reboot after debug stop failed — "
+                         f"{r.get('error', 'unknown')}", "error")
+    except Exception as exc:
+        log_activity(f"{label}: reboot after debug stop failed — {exc}",
+                     "error")
+
+
 def serial_reset(slot: dict) -> dict:
     """FR-008: Reset device via DTR/RTS.  Stops proxy, opens direct serial,
     sends reset pulse, reads initial boot output, restarts proxy.
@@ -1706,6 +1736,8 @@ def bench_reset() -> dict:
         if debug_controller.is_debugging(label):
             attempt(f"stopped debug session on {label}",
                     lambda lbl=label: debug_controller.stop(lbl).get("ok"))
+            if slot.get("present"):
+                _reboot_after_debug(slot, label)
         if slot.get("present"):
             # Restart unconditionally, not only when the proxy has died.
             #
@@ -4686,6 +4718,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if slot["state"] == STATE_DEBUGGING:
                 slot["state"] = STATE_IDLE if slot["present"] else STATE_ABSENT
             log_activity(f"Debug stopped: {slot_label}", "info")
+            _reboot_after_debug(slot, slot_label)
         self._send_json(result)
 
     def _handle_debug_status(self):

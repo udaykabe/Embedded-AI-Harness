@@ -66,6 +66,7 @@ what tools use.
 | **Raspberry Pi** (any model) | Runs the portal. Needs onboard WiFi + Bluetooth. Auto-detects model and USB topology. |
 | **USB Ethernet adapter** (Pi Zero 2 W only) | Wired LAN on eth0 — wlan0 is reserved for WiFi testing. Pi 3/4/5 have built-in Ethernet. |
 | **USB hub** (Pi Zero 2 W only) | Connect multiple ESP32 boards. Pi 3/4/5 already have 4 USB ports. |
+| **Plastic case, or none** | A metal enclosure can stop the Pi's onboard WiFi getting out at all: the bench's AP runs at 5 dBm on purpose. See the [runbook, §8](Bench-Verification-Runbook.md#8-wifi-the-bench-and-the-partner-cannot-hear-each-other). |
 | **RTL-SDR dongle** (optional) | 433/315/868 MHz receive gateway via `rtl_433`. |
 | **Si5351 + PE4302** (optional) | RF signal source + step attenuator. |
 | **Jumper wires** (optional) | Pi GPIO to DUT boot/reset pins for automated download-mode control. |
@@ -103,7 +104,11 @@ settings:
   Pi and in those projects at the same moment.
 - **Enable SSH:** yes (password or key auth)
 - **Username:** `pi`
-- **WiFi:** configure your network (country code as needed)
+- **WiFi:** leave it **unconfigured**, and connect the Pi by Ethernet before
+  first boot. The installer hands `wlan0` to the portal and tells
+  NetworkManager to leave it alone, so a Pi that reached your network over
+  WiFi drops off it partway through the install. Set the WiFi country,
+  though: it decides which channels the bench may use.
 - **Locale:** set timezone as needed
 
 ### 2.2 First boot — system hardening
@@ -162,6 +167,18 @@ cd Embedded-AI-Harness/pi
 sudo bash install.sh
 ```
 
+Clone the repository and branch you mean to run. If you deploy from a fork,
+or from a branch that is not yet merged, clone that: the installer copies
+whatever is checked out, so a clone of the wrong one installs a bench without
+your changes and nothing reports it.
+
+```bash
+git clone -b <branch> https://github.com/<owner>/Embedded-AI-Harness.git
+```
+
+After `install.sh` (still in `pi/`), `md5sum /usr/local/bin/rfc2217-portal portal.py`
+should print the same hash twice.
+
 The installer pulls in all dependencies (pyserial, hostapd, dnsmasq, bleak,
 esptool, OpenOCD, rtl-sdr/rtl_433, mosquitto), copies the scripts to
 `/usr/local/bin/`, installs the udev and dnsmasq callbacks, creates the data
@@ -179,6 +196,13 @@ sudo bash install.sh --update
 curl http://localhost:8080/api/devices   # should list all slots
 curl http://localhost:8080/api/info      # portal version and host info
 ```
+
+To prove the whole bench, including WiFi, debug and flashing, run the bench
+suite against a test partner: see the
+[Bench Verification Runbook](Bench-Verification-Runbook.md). The partner
+firmware must be at least as new as the bench code (an older build lacks the
+`txpower` console command, for example). If no release carries it yet, build
+it with the `test-firmware` workflow and flash the artefact.
 
 Then open `http://$BENCH:8080` in a browser for the web portal — a live
 dashboard of every slot (state, detected chip, debug status, USB devices), WiFi

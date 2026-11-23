@@ -1308,10 +1308,28 @@ def _jtag_capable(dev: dict) -> bool:
     a built-in USB-JTAG interface. A device behind a UART bridge (CP2102,
     CH340) has no JTAG, so the field is None *by design* — asserting a chip for
     it tests a premise the portal never promised.
+
+    Judged by USB vendor ID, then by devnode, then by product string. The
+    product string alone missed a CH340 that names itself just "USB Serial"
+    (1a86:7523): it was taken for a JTAG part and failed three chip-detection
+    tests that had nothing to do with it.
     """
-    products = " ".join(u.get("product", "") for u in dev.get("usb_devices", []))
+    usb = dev.get("usb_devices", [])
+    vendors = {u.get("vid_pid", "").split(":")[0].lower() for u in usb}
+    if vendors & _BRIDGE_VENDORS:
+        return False
+    # Native-USB ESP32s enumerate as cdc_acm (ttyACM*); a ttyUSB* node is a
+    # usb-serial driver, which only bridge chips use.
+    if (dev.get("devnode") or "").startswith("/dev/ttyUSB"):
+        return False
+    products = " ".join(u.get("product", "") for u in usb)
     bridge = any(k in products for k in ("CP210", "CH340", "FT232", "UART Bridge"))
     return not bridge
+
+
+# USB-UART bridge vendors: Silicon Labs (CP210x), WCH (CH34x), FTDI, Prolific.
+# Espressif's own 303a is deliberately absent — that is the native USB-JTAG.
+_BRIDGE_VENDORS = {"10c4", "1a86", "0403", "067b"}
 
 
 def _flash_device(testbench, chip, target_dir):

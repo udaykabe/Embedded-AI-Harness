@@ -356,7 +356,7 @@ the way.
 If the partner's AP is visible to a phone across the room but not to the Pi
 next to it, the problem is at the Pi, not the partner.
 
-### Open issue: the bench as a station times out authenticating
+### Open issue: the bench as a station times out authenticating (workaround known)
 
 Seen on a Pi 4 (Broadcom `brcmfmac`). With both directions measured healthy
 (partner → Pi -30 dBm, Pi → partner -20 dBm), the Pi still could not join the
@@ -377,15 +377,32 @@ managed, right channel), and the regulatory domain (`country CH`, channel 1
 allowed). The same tests passed earlier on the same bench, so the fault is
 intermittent rather than permanent.
 
-Not yet tried, in order:
+**The partner is not at fault.** A USB WiFi adapter on the same Pi, with its
+own driver, joined the same open portal at the first attempt, while `wlan0`
+was still failing. The fault is a state the Pi's built-in radio gets into.
 
-1. A clean boot, then a station join **before** the bench raises any AP, to
-   test whether the AP → station switch is what breaks it.
-2. `sudo modprobe -r brcmfmac && sudo modprobe brcmfmac`, then the join.
-3. `wpa_supplicant -dd` output for one attempt (the bench's config is
+**Workaround: reload the driver.** This cleared it, and all seven tests
+below then passed:
+
+```bash
+curl -s -X POST http://$BENCH:8080/api/wifi/ap_stop
+sudo modprobe -r brcmfmac_cyw brcmfmac; sleep 2; sudo modprobe brcmfmac; sleep 8
+```
+
+A reboot should do the same. The reload alone is enough: with the module
+option `feature_disable=0x82000` (a common Pi WiFi fix, which switches off
+the firmware's own handshake and WPA3 handling) removed again, a reload
+followed by the tests' AP → station switch still joined. So the option is
+not needed, and is best left out, since it costs the Pi WPA3.
+
+Still open: what puts the radio into that state. Candidates are long uptime
+or many AP ↔ station switches. When it recurs, capture before reloading:
+
+1. `wpa_supplicant -dd` output for one attempt (the bench's config is
    `/tmp/wifi-tester/wpa_supplicant.conf`), and `dmesg | grep brcmf` right
    after it.
+2. The uptime, and roughly how many test runs since the last boot.
 
-Until it is resolved, expect these to fail on an affected bench and read them
-as this issue: WT-401, WT-404, WT-405, WT-506 (HTTP via STA), and the captive
-portal tests WT-2101, WT-2103, WT-2104.
+On an affected bench, expect these to fail and read them as this issue:
+WT-401, WT-404, WT-405, WT-506 (HTTP via STA), and the captive portal tests
+WT-2101, WT-2103, WT-2104.

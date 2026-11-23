@@ -826,7 +826,7 @@ def _reload_radio_and_retry_unlocked(ssid, driver, timeout):
     evidence = os.path.join(WORK_DIR, f"radio-reload-{n}.log")
     try:
         dmesg = _run(["dmesg"], timeout=10, check=False)
-        brcmf = "\n".join(l for l in dmesg.splitlines() if driver in l)
+        brcmf = "\n".join(ln for ln in dmesg.splitlines() if driver in ln)
         with open(evidence, "w") as f:
             f.write(f"ssid={ssid} driver={driver} uptime_s={uptime} "
                     f"joins_since_portal_start={_sta_join_attempts}\n\n")

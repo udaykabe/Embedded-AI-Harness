@@ -1,6 +1,6 @@
 # The Harness — AI Closed-Loop Programming for Embedded Systems
 
-[![host tests](https://img.shields.io/github/actions/workflow/status/SensorsIot/Embedded-AI-Harness/ci.yml?branch=main&label=host%20tests)](https://github.com/SensorsIot/Embedded-AI-Harness/actions/workflows/ci.yml)
+[![host tests](https://img.shields.io/github/actions/workflow/status/udaykabe/Embedded-AI-Harness/ci.yml?branch=main&label=host%20tests)](https://github.com/udaykabe/Embedded-AI-Harness/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-c51a4a)
@@ -8,6 +8,10 @@
 ![MCP](https://img.shields.io/badge/MCP-70%20tools-8a63d2)
 
 *Spec to silicon, hands off.*
+
+> Maintained by **EdgeAIoT**. Based on the
+> [Embedded AI Harness](https://github.com/SensorsIot/Embedded-AI-Harness) by
+> SensorsIot, MIT-licensed.
 
 A horse is strong, fast, and willing — and useless for heavy loads until you
 harness it. The harness is not a part of the horse and not a part of the cart:
@@ -86,7 +90,7 @@ spec true for the product's whole life.
 |---|---|---|
 | A **Raspberry Pi testbench** (Pi 3/4/5, or Zero 2 W + USB hub + Ethernet adapter) with an ESP32 board in a slot | The loop's hands and eyes — flash, reset, observe on real hardware | Build it: [Quick Start](#-quick-start--building-the-bench) below |
 | A **GitHub account**, `git` + `gh` authenticated | **This is where the firmware is built** — see below | [github.com](https://github.com) |
-| **Claude Code** with the `embedded-ai-harness` plugin | The AI that pulls; the skills are the method | `npm i -g @anthropic-ai/claude-code`, then `claude plugin marketplace add SensorsIot/Embedded-AI-Harness` and `claude plugin install embedded-ai-harness@embedded-ai-harness` |
+| **Claude Code** with the `embedded-ai-harness` plugin | The AI that pulls; the skills are the method | `npm i -g @anthropic-ai/claude-code`, then `claude plugin marketplace add udaykabe/Embedded-AI-Harness` and `claude plugin install embedded-ai-harness@embedded-ai-harness` |
 | **Same LAN** | Your dev machine or devcontainer must reach the bench | `curl http://$BENCH:8080/api/devices` answers |
 
 Throughout this README, **`$BENCH` is the bench's IP address** — never a
@@ -190,7 +194,7 @@ An RTL-SDR dongle, an Si5351 + PE4302, and jumper wires to the board's
 EN/BOOT pins are all optional.
 
 ```bash
-git clone https://github.com/SensorsIot/Embedded-AI-Harness.git
+git clone https://github.com/udaykabe/Embedded-AI-Harness.git
 cd Embedded-AI-Harness/pi
 sudo bash install.sh
 ```
@@ -259,7 +263,7 @@ instrument skills ship as the `embedded-ai-harness` Claude Code plugin; this
 repository is its marketplace:
 
 ```
-/plugin install embedded-ai-harness --marketplace SensorsIot/Embedded-AI-Harness
+/plugin install embedded-ai-harness --marketplace udaykabe/Embedded-AI-Harness
 ```
 
 Setup, scopes and updates:

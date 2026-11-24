@@ -162,7 +162,7 @@ free -h                       # should show ~480 MB total + swap
 ### 2.3 Install the testbench
 
 ```bash
-git clone https://github.com/SensorsIot/Embedded-AI-Harness.git
+git clone https://github.com/udaykabe/Embedded-AI-Harness.git
 cd Embedded-AI-Harness/pi
 sudo bash install.sh
 ```
@@ -1018,7 +1018,7 @@ Code plugin, `embedded-ai-harness`. This repository is its marketplace, so
 there is nothing to copy. Install it once per machine, or once per project:
 
 ```bash
-claude plugin marketplace add SensorsIot/Embedded-AI-Harness
+claude plugin marketplace add udaykabe/Embedded-AI-Harness
 claude plugin install embedded-ai-harness@embedded-ai-harness                  # every project on this machine
 claude plugin install embedded-ai-harness@embedded-ai-harness --scope project  # this project only
 ```

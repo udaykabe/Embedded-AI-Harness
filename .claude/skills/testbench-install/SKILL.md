@@ -33,7 +33,7 @@ actually do it.
 ## Fresh install
 
 ```bash
-git clone https://github.com/SensorsIot/Embedded-AI-Harness.git
+git clone https://github.com/udaykabe/Embedded-AI-Harness.git
 cd Embedded-AI-Harness/pi
 sudo bash install.sh
 ```

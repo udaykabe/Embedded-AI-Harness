@@ -1,9 +1,10 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "embedded-ai-harness",
-  "description": "The Embedded AI Harness: AI closed-loop firmware development against a Raspberry Pi testbench.",
+  "description": "EdgeAIoT: AI closed-loop firmware development for IoT devices against a Raspberry Pi testbench.",
   "owner": {
-    "name": "SensorsIot"
+    "name": "EdgeAIoT",
+    "url": "https://github.com/udaykabe/Embedded-AI-Harness"
   },
   "plugins": [
     {

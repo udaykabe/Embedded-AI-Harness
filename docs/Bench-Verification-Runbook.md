@@ -92,24 +92,19 @@ the **targets in `.github/workflows/test-firmware.yml`** (esp32c3 and esp32s3
 at the time of writing). `debug-test/` has its own target list. A board of any
 other chip cannot be the partner.
 
-Get the image. CI artifacts need `gh auth login`; release assets do not:
+The image is attached to every release: `release.yml` builds it when a `v*`
+tag is pushed. Release assets never expire and need no login, unlike CI
+artifacts. The suite can fetch and flash it by itself (§6). To flash it by
+hand, for a first install or a new board, and check that it answers:
 
 ```bash
 TARGET=esp32s3          # or esp32c3
-VERSION=<release tag, e.g. v1.0.1>
-D=/tmp/partner && mkdir -p $D && cd $D
-curl -sLO https://github.com/SensorsIot/Embedded-AI-Harness/releases/download/$VERSION/test-partner-$TARGET.tar.gz
-tar xzf test-partner-$TARGET.tar.gz
-```
-
-Flash it through the bench and check that it answers:
-
-```bash
-cd pytest && python3 - "http://$BENCH:8080" /tmp/partner/test-partner-$TARGET $SLOT $TARGET <<'EOF'
+cd pytest && python3 - "http://$BENCH:8080" $SLOT $TARGET <<'EOF'
 import sys, time
 from testbench_driver import TestbenchDriver
-from conftest import _flash_args_offsets, _dut_answers
-url, image_dir, slot, chip = sys.argv[1:5]
+from conftest import release_partner_image, _flash_args_offsets, _dut_answers
+url, slot, chip = sys.argv[1:4]
+image_dir = release_partner_image(chip)       # latest release, cached
 wt = TestbenchDriver(url)
 r = wt.flash(slot, dict(_flash_args_offsets(image_dir)), chip=chip)
 print({k: v for k, v in r.items() if k != "output"})
@@ -118,9 +113,12 @@ print("answers ping:", _dut_answers(wt, slot, timeout=15))
 EOF
 ```
 
-The suite can restore the partner itself (`WT_TEST_PARTNER_IMAGE`), but only
-on a slot with a `detected_chip`. On a bench with the slot fault in §7 that
-never happens, so flash it by hand.
+`release_partner_image(chip, "v1.2.0")` takes a specific release. Downloads
+are cached in `~/.cache/embedded-ai-harness/test-partner/<tag>/`.
+
+The suite restores the partner itself when `WT_TEST_PARTNER_IMAGE` is set
+(§6), but only on a slot with a `detected_chip`. On a bench with the slot
+fault in §7 that never happens, so flash it by hand.
 
 ## 6. Run the bench suite
 
@@ -136,10 +134,19 @@ long. The output only appears at the end; follow progress in the bench's
 activity log meanwhile:
 
 ```bash
-WT_TEST_PARTNER_IMAGE=/tmp/partner/test-partner-$TARGET \
+WT_TEST_PARTNER_IMAGE=release \
   pytest pytest/testbench_test.py --wt-url http://$BENCH:8080 --run-dut -q -rfEs
 curl -s "http://$BENCH:8080/api/log?limit=20" | jq -r '.entries[] | "\(.ts[11:19]) \(.msg)"'
 ```
+
+`WT_TEST_PARTNER_IMAGE` is the opt-in to reflash the partner when it stops
+answering, for example after WT-1800 flashes a throwaway image over it. It
+takes `release` (the latest release), `release:<tag>`, or a local folder
+holding a build and its `flash_args`. Unset, the suite never flashes the
+partner: a board that does not answer may be your project, not a partner.
+
+A bench that needs the partner louder or on another channel (§8) adds
+`WT_TEST_PARTNER_TXPOWER=52` and `WT_TEST_PARTNER_APCHAN=6`.
 
 Do not pass `--timeout` unless `pytest-timeout` is installed; pytest refuses to
 start on an unknown flag.

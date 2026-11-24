@@ -74,4 +74,9 @@ jobs:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           ls -l dist/
+          # A pushed tag is not a release. Create it if nobody has yet, so a
+          # tag alone is enough to publish; an existing release keeps its
+          # notes and only gains (or replaces) the firmware.
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
           gh release upload "$TAG" dist/*.tar.gz --clobber

@@ -4,8 +4,15 @@ Usage:
     pytest testbench_test.py --wt-url http://<pi-ip>:8080
 """
 
+import glob
+import json
 import os
+import shutil
+import tarfile
+import tempfile
 import time
+import urllib.error
+import urllib.request
 import uuid
 
 import pytest
@@ -110,9 +117,17 @@ def wifi_network(testbench):
 TEST_PARTNER_PORTAL = "WB-Test-Setup"   # SSID it advertises unprovisioned
 TEST_PARTNER_HTTP_PORT = 8080           # its own server, not the portal's
 
-# Where a known-good bench-partner image lives: a directory holding the images
-# and the `flash_args` that names their offsets, exactly as CI publishes it.
+# Where a known-good bench-partner image lives, and the opt-in to restore it.
+# Either a directory holding the images and the `flash_args` that names their
+# offsets, exactly as CI publishes it; or `release` (the latest GitHub release
+# of TEST_PARTNER_REPO) or `release:<tag>`, downloaded once and cached. Unset,
+# the suite never flashes the partner: a board that does not answer the
+# partner's console may be someone's project, not a partner that lost its
+# image.
 TEST_PARTNER_IMAGE_ENV = "WT_TEST_PARTNER_IMAGE"
+TEST_PARTNER_REPO_ENV = "WT_TEST_PARTNER_REPO"
+TEST_PARTNER_REPO = "udaykabe/Embedded-AI-Harness"
+TEST_PARTNER_CHIPS = ("esp32c3", "esp32s3")   # what release.yml builds
 
 # Partner transmit power, quarter-dBm (52 = 13 dBm). Unset leaves the
 # partner as it is. For a bench that cannot hear the partner's 5 dBm default:
@@ -139,6 +154,79 @@ def _dut_answers(testbench, slot, timeout=6.0) -> bool:
             return True
         time.sleep(0.5)
     return False
+
+
+def _partner_cache_dir():
+    base = (os.environ.get("XDG_CACHE_HOME")
+            or os.path.join(os.path.expanduser("~"), ".cache"))
+    return os.path.join(base, "embedded-ai-harness", "test-partner")
+
+
+def _http_get(url, timeout):
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "embedded-ai-harness-tests",
+        "Accept": "application/vnd.github+json, application/octet-stream",
+    })
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def release_partner_image(chip, tag="latest"):
+    """Directory with a release's partner firmware for `chip`; downloads once.
+
+    A release asset does not expire and needs no token, unlike a CI artifact.
+    Cached under ~/.cache/embedded-ai-harness/test-partner/<tag>/. Offline,
+    "latest" falls back to the newest cached copy. Raises RuntimeError saying
+    what went wrong.
+    """
+    if chip not in TEST_PARTNER_CHIPS:
+        raise RuntimeError(f"releases carry no partner firmware for {chip}")
+    repo = os.environ.get(TEST_PARTNER_REPO_ENV, TEST_PARTNER_REPO)
+    cache = _partner_cache_dir()
+    name = f"test-partner-{chip}"
+    if tag == "latest":
+        try:
+            with _http_get(f"https://api.github.com/repos/{repo}/releases/latest",
+                           timeout=15) as r:
+                tag = json.load(r)["tag_name"]
+        except Exception as exc:
+            cached = sorted(glob.glob(os.path.join(cache, "*", name, "flash_args")),
+                            key=os.path.getmtime)
+            if cached:
+                return os.path.dirname(cached[-1])
+            raise RuntimeError(
+                f"could not look up the latest release of {repo}: {exc}") from exc
+
+    dest = os.path.join(cache, tag)
+    image_dir = os.path.join(dest, name)
+    if os.path.isfile(os.path.join(image_dir, "flash_args")):
+        return image_dir
+
+    url = f"https://github.com/{repo}/releases/download/{tag}/{name}.tar.gz"
+    os.makedirs(dest, exist_ok=True)
+    tmp = tempfile.mkdtemp(dir=dest)
+    try:
+        archive = os.path.join(tmp, "fw.tar.gz")
+        try:
+            with _http_get(url, timeout=60) as r, open(archive, "wb") as f:
+                shutil.copyfileobj(r, f)
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"could not download {url}: HTTP {exc.code}") from exc
+        with tarfile.open(archive) as tar:
+            tar.extractall(tmp, filter="data")   # no paths outside tmp
+        got = os.path.join(tmp, name)
+        if not os.path.isfile(os.path.join(got, "flash_args")):
+            raise RuntimeError(f"{url} holds no {name}/flash_args")
+        os.replace(got, image_dir)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return image_dir
+
+
+def _partner_image_for(source, chip):
+    """Resolve WT_TEST_PARTNER_IMAGE to a directory for `chip`."""
+    if source == "release" or source.startswith("release:"):
+        return release_partner_image(chip, source.partition(":")[2] or "latest")
+    return source
 
 
 def _flash_args_offsets(image_dir):
@@ -173,26 +261,34 @@ def ensure_test_partner_firmware(testbench):
     Absence of a configured image is not an error: the fixtures downstream
     already report an unmet precondition naming what to flash.
     """
-    image_dir = os.environ.get(TEST_PARTNER_IMAGE_ENV)
+    source = os.environ.get(TEST_PARTNER_IMAGE_ENV, "").strip()
     slots = [d for d in testbench.get_devices() if d.get("present")]
     for dev in slots:
         if _dut_answers(testbench, dev["label"]):
             return None                     # already the image we want
-    if not image_dir or not os.path.isdir(image_dir):
-        return None                         # nothing to restore from
-    # The image directory is built for one target, and the bench may now hold
-    # more than one kind of part. Flashing an esp32s3 image at an esp32c6 gets
-    # as far as esptool refusing it — "This chip is ESP32-C6, not ESP32-S3" —
-    # so prefer the slot the image is actually for.
-    want = os.path.basename(image_dir.rstrip("/")).rsplit("-", 1)[-1]
-    slots = ([d for d in slots if d.get("detected_chip") == want]
-             or [d for d in slots if d.get("detected_chip")])
+    if not source:
+        return None                         # restoring was not asked for
+    from_release = source == "release" or source.startswith("release:")
+    if from_release:
+        # One image per chip, so only slots holding a chip releases build for.
+        slots = [d for d in slots if d.get("detected_chip") in TEST_PARTNER_CHIPS]
+    else:
+        if not os.path.isdir(source):
+            return None                     # nothing to restore from
+        # The image directory is built for one target, and the bench may now
+        # hold more than one kind of part. Flashing an esp32s3 image at an
+        # esp32c6 gets as far as esptool refusing it — "This chip is
+        # ESP32-C6, not ESP32-S3" — so prefer the slot the image is for.
+        want = os.path.basename(source.rstrip("/")).rsplit("-", 1)[-1]
+        slots = ([d for d in slots if d.get("detected_chip") == want]
+                 or [d for d in slots if d.get("detected_chip")])
 
     for dev in slots:
         chip = dev.get("detected_chip")
         if not chip:
             continue
         try:
+            image_dir = _partner_image_for(source, chip)
             images = dict(_flash_args_offsets(image_dir))
             r = testbench.flash(dev["label"], images, chip=chip)
             if not r.get("ok"):

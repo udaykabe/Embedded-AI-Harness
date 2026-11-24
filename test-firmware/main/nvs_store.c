@@ -169,3 +169,36 @@ esp_err_t nvs_store_clear_txpower(void)
     ESP_LOGI(TAG, "tx power override cleared");
     return err;
 }
+
+esp_err_t nvs_store_set_apchan(uint8_t chan)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(h, "ap_chan", chan);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "AP channel override saved: %u", chan);
+    return err;
+}
+
+bool nvs_store_get_apchan(uint8_t *chan)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return false;
+    esp_err_t err = nvs_get_u8(h, "ap_chan", chan);
+    nvs_close(h);
+    return err == ESP_OK;
+}
+
+esp_err_t nvs_store_clear_apchan(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    nvs_erase_key(h, "ap_chan");
+    err = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "AP channel override cleared");
+    return err;
+}

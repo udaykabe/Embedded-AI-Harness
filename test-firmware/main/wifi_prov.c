@@ -75,6 +75,56 @@ esp_err_t wifi_prov_clear_txpower(void)
     return err;
 }
 
+/* Channel of this partner's own AP. 1 by default; `apchan <n>` stores an
+ * override (nvs_store_set_apchan) for a bench whose neighbours crowd
+ * channel 1. */
+#define AP_CHANNEL  1
+
+int wifi_prov_apchan_default(void)
+{
+    return AP_CHANNEL;
+}
+
+int wifi_prov_apchan(void)
+{
+    uint8_t c;
+    if (nvs_store_get_apchan(&c) &&
+        c >= WIFI_PROV_APCHAN_MIN && c <= WIFI_PROV_APCHAN_MAX)
+        return c;
+    return AP_CHANNEL;
+}
+
+/* Move a running AP to the channel now in force. Its clients drop and must
+ * rejoin; a caller changing the channel is asking for exactly that. */
+static esp_err_t apply_apchan(void)
+{
+    if (!wifi_prov_is_ap_mode()) return ESP_OK;   /* used at the next AP start */
+    wifi_config_t c;
+    esp_err_t err = esp_wifi_get_config(WIFI_IF_AP, &c);
+    if (err != ESP_OK) return err;
+    c.ap.channel = wifi_prov_apchan();
+    err = esp_wifi_set_config(WIFI_IF_AP, &c);
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "AP moved to channel %d", c.ap.channel);
+    return err;
+}
+
+esp_err_t wifi_prov_set_apchan(int chan)
+{
+    if (chan < WIFI_PROV_APCHAN_MIN || chan > WIFI_PROV_APCHAN_MAX)
+        return ESP_ERR_INVALID_ARG;
+    esp_err_t err = nvs_store_set_apchan((uint8_t)chan);
+    if (err == ESP_OK) err = apply_apchan();
+    return err;
+}
+
+esp_err_t wifi_prov_clear_apchan(void)
+{
+    esp_err_t err = nvs_store_clear_apchan();
+    if (err == ESP_OK) err = apply_apchan();
+    return err;
+}
+
 extern const char portal_html_start[] asm("_binary_portal_html_start");
 extern const char portal_html_end[]   asm("_binary_portal_html_end");
 
@@ -365,7 +415,7 @@ static esp_err_t start_ap_named(const char *ssid, const char *password)
 
     wifi_config_t wifi_cfg = {
         .ap = {
-            .channel = 1,
+            .channel = wifi_prov_apchan(),
             .max_connection = 4,
             .authmode = WIFI_AUTH_OPEN,
         },
@@ -387,8 +437,8 @@ static esp_err_t start_ap_named(const char *ssid, const char *password)
     ESP_ERROR_CHECK(esp_wifi_start());
 
     set_low_tx_power();
-    ESP_LOGI(TAG, "AP started: SSID='%s' channel=1 auth=%s",
-             (char *)wifi_cfg.ap.ssid,
+    ESP_LOGI(TAG, "AP started: SSID='%s' channel=%d auth=%s",
+             (char *)wifi_cfg.ap.ssid, wifi_cfg.ap.channel,
              wifi_cfg.ap.authmode == WIFI_AUTH_OPEN ? "OPEN" : "WPA2-PSK");
 
     /* Captive portal HTTP + DNS */

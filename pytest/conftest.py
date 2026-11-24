@@ -118,6 +118,7 @@ TEST_PARTNER_IMAGE_ENV = "WT_TEST_PARTNER_IMAGE"
 # partner as it is. For a bench that cannot hear the partner's 5 dBm default:
 # a metal enclosure, or a USB 3 device beside the Pi's antenna.
 TEST_PARTNER_TXPOWER_ENV = "WT_TEST_PARTNER_TXPOWER"
+TEST_PARTNER_APCHAN_ENV = "WT_TEST_PARTNER_APCHAN"
 
 
 def _dut_answers(testbench, slot, timeout=6.0) -> bool:
@@ -207,14 +208,14 @@ def ensure_test_partner_firmware(testbench):
     return None
 
 
-def apply_test_partner_txpower(testbench):
-    """Send `txpower <WT_TEST_PARTNER_TXPOWER>` to the partner, if set.
+def _send_partner_setting(testbench, verb, env):
+    """Send `<verb> <$env>` to the partner's console, if the variable is set.
 
     Returns what happened, or None when the variable is unset. Never raises:
     a partner built before the command existed answers "ERR unknown command",
     and that must read as "update the partner", not as a failed suite.
     """
-    want = os.environ.get(TEST_PARTNER_TXPOWER_ENV)
+    want = os.environ.get(env)
     if not want:
         return None
     for dev in testbench.get_devices():
@@ -222,17 +223,32 @@ def apply_test_partner_txpower(testbench):
             continue
         slot = dev["label"]
         since = time.time()
-        testbench.serial_write(slot, text=f"txpower {want}")
+        testbench.serial_write(slot, text=f"{verb} {want}")
         deadline = time.time() + 6
         while time.time() < deadline:
             for ln in testbench.serial_output(slot, lines=200,
                                               since=since).get("lines", []):
                 text = ln.get("text", "")
-                if text.startswith(("OK txpower", "ERR")):
+                if text.startswith((f"OK {verb}", "ERR")):
                     return f"{slot}: {text}"
             time.sleep(0.5)
-        return f"{slot}: no answer to 'txpower {want}'"
+        return f"{slot}: no answer to '{verb} {want}'"
     return "no partner answered the console"
+
+
+def apply_test_partner_txpower(testbench):
+    """Send `txpower <WT_TEST_PARTNER_TXPOWER>` to the partner, if set."""
+    return _send_partner_setting(testbench, "txpower", TEST_PARTNER_TXPOWER_ENV)
+
+
+def apply_test_partner_apchan(testbench):
+    """Send `apchan <WT_TEST_PARTNER_APCHAN>` to the partner, if set.
+
+    For a bench whose neighbours crowd the partner's default channel (1):
+    the Pi's station then times out joining the partner (status 16) while
+    every link on the bench's own channel works.
+    """
+    return _send_partner_setting(testbench, "apchan", TEST_PARTNER_APCHAN_ENV)
 
 
 @pytest.fixture(scope="session")
@@ -252,6 +268,9 @@ def _test_partner_session(testbench):
     txp = apply_test_partner_txpower(testbench)
     if txp:
         print(f"[test partner] {TEST_PARTNER_TXPOWER_ENV}: {txp}", flush=True)
+    chan = apply_test_partner_apchan(testbench)
+    if chan:
+        print(f"[test partner] {TEST_PARTNER_APCHAN_ENV}: {chan}", flush=True)
     ssid = f"WT-{uuid.uuid4().hex[:6].upper()}"
     password = "testpass123"
     testbench.drain_events()

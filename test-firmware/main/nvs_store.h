@@ -48,3 +48,12 @@ bool      nvs_store_get_broker(char *uri, size_t uri_len);
 esp_err_t nvs_store_set_txpower(int8_t qdbm);
 bool      nvs_store_get_txpower(int8_t *qdbm);
 esp_err_t nvs_store_clear_txpower(void);
+
+/* Channel for the partner's own AP (portal and `testap`). Stored for the same
+ * reason as the tx power, and for the same kind of bench: one whose
+ * neighbours sit on the default channel. A cable modem's WiFi a foot from
+ * the Pi, on channel 1 at -27 dBm, left the Pi's station timing out on this
+ * partner's channel-1 AP while every channel-6 link worked. */
+esp_err_t nvs_store_set_apchan(uint8_t chan);
+bool      nvs_store_get_apchan(uint8_t *chan);
+esp_err_t nvs_store_clear_apchan(void);

@@ -159,6 +159,43 @@ static void cmd_txpower(char *rest)
           now, now / 4.0, wifi_prov_txpower_default(), ov);
 }
 
+/* `apchan`             -> report the AP channel in use, the default, any override
+ * `apchan <1..13>`      -> store an override and move a running AP now
+ * `apchan default`      -> remove the override
+ * For a bench whose neighbours crowd the default channel. Moving a running
+ * AP drops its clients. */
+static void cmd_apchan(char *rest)
+{
+    while (*rest == ' ') rest++;
+    if (*rest) {
+        esp_err_t err;
+        if (!strcmp(rest, "default")) {
+            err = wifi_prov_clear_apchan();
+        } else {
+            char *end = NULL;
+            long c = strtol(rest, &end, 10);
+            if (end == rest || *end != '\0' ||
+                c < WIFI_PROV_APCHAN_MIN || c > WIFI_PROV_APCHAN_MAX) {
+                reply("ERR apchan needs %d..%d or 'default'",
+                      WIFI_PROV_APCHAN_MIN, WIFI_PROV_APCHAN_MAX);
+                return;
+            }
+            err = wifi_prov_set_apchan((int)c);
+        }
+        if (err != ESP_OK) {
+            reply("ERR apchan not applied: %s", esp_err_to_name(err));
+            return;
+        }
+    }
+    uint8_t stored = 0;
+    bool has = nvs_store_get_apchan(&stored);
+    char ov[8];
+    if (has) snprintf(ov, sizeof ov, "%u", stored);
+    else     snprintf(ov, sizeof ov, "none");
+    reply("OK apchan now=%d default=%d override=%s",
+          wifi_prov_apchan(), wifi_prov_apchan_default(), ov);
+}
+
 static void handle_line(char *line)
 {
     while (*line == ' ') line++;
@@ -182,10 +219,11 @@ static void handle_line(char *line)
                 strlcpy(ap_ssid, (const char *)c.ap.ssid, sizeof(ap_ssid));
         }
         reply("OK status wifi=%d ap_mode=%d ap_ssid=%s ip=%s mac=%s "
-              "mqtt=%d topic=%s",
+              "mqtt=%d topic=%s ap_chan=%d",
               wifi_prov_is_connected() ? 1 : 0,
               wifi_prov_is_ap_mode() ? 1 : 0, ap_ssid, ip, mac,
-              mqtt_pub_is_connected() ? 1 : 0, mqtt_pub_topic());
+              mqtt_pub_is_connected() ? 1 : 0, mqtt_pub_topic(),
+              wifi_prov_apchan());
     } else if (!strcmp(line, "scan")) {
         /* The DUT's own view of the air. Without it, a DUT that will not
          * join the bench AP is indistinguishable from a bench AP that is
@@ -224,6 +262,8 @@ static void handle_line(char *line)
         cmd_testap(rest);
     } else if (!strcmp(line, "txpower")) {
         cmd_txpower(rest);
+    } else if (!strcmp(line, "apchan")) {
+        cmd_apchan(rest);
     } else if (!strcmp(line, "forget")) {
         nvs_store_erase_wifi();
         reply("OK forget — rebooting into the provisioning portal");
@@ -237,7 +277,7 @@ static void handle_line(char *line)
         /* Name what was not understood. A bare "ERR" tells a caller nothing
            about whether it mistyped or is talking to the wrong device. */
         reply("ERR unknown command '%s' — try "
-              "ping|status|scan|info|mark|wifi|testap|txpower|forget|reboot", line);
+              "ping|status|scan|info|mark|wifi|testap|txpower|apchan|forget|reboot", line);
     }
 }
 
@@ -280,6 +320,6 @@ esp_err_t serial_console_init(void)
     }
     xTaskCreate(console_task, "console", 4096, NULL, 5, NULL);
     ESP_LOGI(TAG, "serial console ready — "
-                  "ping|status|scan|info|mark|wifi|testap|txpower|forget|reboot");
+                  "ping|status|scan|info|mark|wifi|testap|txpower|apchan|forget|reboot");
     return ESP_OK;
 }

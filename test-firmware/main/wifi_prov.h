@@ -33,3 +33,15 @@ void wifi_prov_get_mac(char *out, size_t out_sz);
 int       wifi_prov_txpower_default(void);
 esp_err_t wifi_prov_set_txpower(int qdbm);
 esp_err_t wifi_prov_clear_txpower(void);
+
+/* Channel of the partner's own AP (the portal, and `testap`). Setting stores
+ * an override that survives reboots and moves a running AP at once, which
+ * drops its clients; clearing returns to the built-in default. Driven by
+ * the console's `apchan`. 1..13: the bench's country decides which of
+ * those it may use. */
+#define WIFI_PROV_APCHAN_MIN  1
+#define WIFI_PROV_APCHAN_MAX  13
+int       wifi_prov_apchan_default(void);
+int       wifi_prov_apchan(void);
+esp_err_t wifi_prov_set_apchan(int chan);
+esp_err_t wifi_prov_clear_apchan(void);

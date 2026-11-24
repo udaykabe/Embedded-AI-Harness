@@ -338,7 +338,10 @@ the way.
 
 ### Remedies
 
-- Run the Pi uncased or in a plastic case, and move USB 3 devices away.
+- Run the Pi uncased or in a plastic case, or keep a metal case and raise
+  the bench AP's power (next point): at 20 dBm, a Pi 4 in a DeskPi Pro
+  reached the partner at -30 dBm and passed every WiFi test. Move USB 3
+  devices away from the antenna either way.
 - Raise the bench AP's power: set `WIFI_AP_TXPOWER_MBM` (mBm; 1300 = 13 dBm)
   in the portal's service environment and restart it.
 - Raise the partner's power, which needs a partner build that has the
@@ -356,67 +359,75 @@ the way.
 If the partner's AP is visible to a phone across the room but not to the Pi
 next to it, the problem is at the Pi, not the partner.
 
-### Open issue: the bench as a station times out authenticating (workaround known)
+### The bench as a station times out authenticating: a neighbour on the partner's channel
 
-Seen on a Pi 4 (Broadcom `brcmfmac`). With both directions measured healthy
-(partner → Pi -30 dBm, Pi → partner -20 dBm), the Pi still could not join the
-partner's open portal, while a phone joined it at once:
+Seen on a Pi 4 (Broadcom `brcmfmac`). The Pi could not join the partner's AP,
+while a phone, and a USB WiFi adapter on the same Pi, joined it at once:
 
 ```
 wlan0: Trying to associate with <partner-ap-mac> (SSID='WB-Test-Setup' freq=2412 MHz)
 wlan0: CTRL-EVENT-ASSOC-REJECT bssid=00:00:00:00:00:00 status_code=16
 ```
 
-The all-zeros BSSID means the Pi's own driver gave up: status 16 is an
-authentication timeout, a request with no reply heard. The partner logged no
-attempt at all.
+The all-zeros BSSID means the Pi's own firmware gave up: status 16 is an
+authentication timeout. The partner logged no attempt at all.
 
-Ruled out: signal (above), the Pi's transmit power (also failed at 31 dBm),
-a leftover `hostapd` (none running), a second interface (only `wlan0`, type
-managed, right channel), and the regulatory domain (`country CH`, channel 1
-allowed). The same tests passed earlier on the same bench, so the fault is
-intermittent rather than permanent.
+**Cause: another network on the partner's channel.** The partner's AP is on
+channel 1 by default. On this bench a cable modem with WiFi built in sat a
+foot from the Pi, on channel 1, heard at -27 dBm: louder than the partner.
+The signature:
 
-**The partner is not at fault.** A USB WiFi adapter on the same Pi, with its
-own driver, joined the same open portal at the first attempt, while `wlan0`
-was still failing. The fault is a state the Pi's built-in radio gets into.
+- every link on the bench's own channel (6) worked, in both directions;
+- every station join to the partner on channel 1 failed, and the partner
+  dropped out of some of the Pi's scans while being strong in the others;
+- it came and went, so it once looked like a radio fault that a driver
+  reload cured. It was not: in the next session the bench reloaded the
+  driver ten times without one recovery.
 
-**Workaround: reload the driver.** This cleared it, and all seven tests
-below then passed:
+A phone or a USB adapter retries in its own way and got through; the Pi's
+built-in radio runs the join in its own firmware and gives up quickly.
+
+**Check for it.** List what the bench hears on each channel, with its AP
+stopped:
 
 ```bash
 curl -s -X POST http://$BENCH:8080/api/wifi/ap_stop
-sudo modprobe -r brcmfmac_cyw brcmfmac; sleep 2; sudo modprobe brcmfmac; sleep 8
+curl -s http://$BENCH:8080/api/wifi/scan | jq -r '.networks[] | "\(.channel)\t\(.rssi)\t\(.ssid)"' | sort -n
 ```
 
-A reboot should do the same. The reload alone is enough: with the module
-option `feature_disable=0x82000` (a common Pi WiFi fix, which switches off
-the firmware's own handshake and WPA3 handling) removed again, a reload
-followed by the tests' AP → station switch still joined. So the option is
-not needed, and is best left out, since it costs the Pi WPA3.
+A network on the partner's channel that is about as loud as the partner, or
+louder, is the suspect.
 
-**The bench now does this itself.** When a station join fails with exactly
-that line, the bench reloads the driver once and joins again (only for
-`brcmfmac`; set `WIFI_STA_RADIO_RELOAD=0` in the portal's environment to turn
-it off). Each time it does, it:
+**Remedy: move the partner's AP.** Partner builds with the `apchan` command
+take a channel, stored and applied at once:
 
-- adds a warning to the activity log,
-- adds an entry to `radio_reloads` in `/api/wifi/ping`, with the system uptime
-  and the number of joins since the portal started, and
-- saves the wpa_supplicant log and the driver's `dmesg` lines to
-  `/tmp/wifi-tester/radio-reload-N.log` on the Pi.
+```bash
+# once, by hand
+curl -s -X POST http://$BENCH:8080/api/serial/write \
+     -H 'Content-Type: application/json' -d "{\"slot\":\"$SLOT\",\"text\":\"apchan 6\"}"
+# or on every suite run
+WT_TEST_PARTNER_APCHAN=6 pytest pytest/testbench_test.py ...
+```
 
-So a run that passes may still have hit the fault: check `radio_reloads`.
+Channel 6 is the bench's own, and a safe choice: the bench's AP is never on
+while the bench joins the partner. With the partner moved there, the same
+bench, Pi in its metal case, passed all 38 WiFi tests. Turning the
+neighbour's WiFi off, or moving it to another channel, works as well.
 
-Still open: what puts the radio into that state. Candidates are long uptime
-or many AP ↔ station switches; the `radio_reloads` entries are meant to show
-which. When it recurs, also capture:
+Ruled out along the way, so they need not be chased again: the Pi's
+transmit power (also failed at 31 dBm), WiFi power save (failed with it off),
+a leftover `hostapd`, the regulatory domain, the brcmfmac module option
+`feature_disable=0x82000` (not needed; leave it out, it costs the Pi WPA3),
+and the partner itself.
 
-1. `wpa_supplicant -dd` output for one attempt (the bench's config is
-   `/tmp/wifi-tester/wpa_supplicant.conf`), and `dmesg | grep brcmf` right
-   after it.
-2. The uptime, and roughly how many test runs since the last boot.
+**The bench's driver reload.** When a station join fails with exactly that
+line, the bench reloads `brcmfmac` once and retries (set
+`WIFI_STA_RADIO_RELOAD=0` in the portal's environment to turn it off). It was
+added for the radio-fault theory above and has not yet recovered a join. Its
+records are still useful: each reload adds a warning to the activity log, an
+entry to `radio_reloads` in `/api/wifi/ping`, and the wpa_supplicant log and
+driver messages in `/tmp/wifi-tester/radio-reload-N.log` on the Pi. Entries
+there mean the bench hit this failure, even on a run that passed.
 
-On an affected bench, expect these to fail and read them as this issue:
-WT-401, WT-404, WT-405, WT-506 (HTTP via STA), and the captive portal tests
-WT-2101, WT-2103, WT-2104.
+The tests that fail on an affected bench: WT-401, WT-404, WT-405, WT-506
+(HTTP via STA), and the captive portal tests WT-2101, WT-2103, WT-2104.

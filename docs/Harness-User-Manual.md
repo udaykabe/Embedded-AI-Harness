@@ -66,7 +66,7 @@ what tools use.
 | **Raspberry Pi** (any model) | Runs the portal. Needs onboard WiFi + Bluetooth. Auto-detects model and USB topology. |
 | **USB Ethernet adapter** (Pi Zero 2 W only) | Wired LAN on eth0 — wlan0 is reserved for WiFi testing. Pi 3/4/5 have built-in Ethernet. |
 | **USB hub** (Pi Zero 2 W only) | Connect multiple ESP32 boards. Pi 3/4/5 already have 4 USB ports. |
-| **Plastic case, or none** | A metal enclosure can stop the Pi's onboard WiFi getting out at all: the bench's AP runs at 5 dBm on purpose. See the [runbook, §8](Bench-Verification-Runbook.md#8-wifi-the-bench-and-the-partner-cannot-hear-each-other). |
+| **Plastic case, or none** | A metal enclosure can stop the Pi's onboard WiFi getting out at all: the bench's AP runs at 5 dBm on purpose. A metal case can work with the AP's power raised (`WIFI_AP_TXPOWER_MBM=2000`). See the [runbook, §8](Bench-Verification-Runbook.md#8-wifi-the-bench-and-the-partner-cannot-hear-each-other). |
 | **RTL-SDR dongle** (optional) | 433/315/868 MHz receive gateway via `rtl_433`. |
 | **Si5351 + PE4302** (optional) | RF signal source + step attenuator. |
 | **Jumper wires** (optional) | Pi GPIO to DUT boot/reset pins for automated download-mode control. |

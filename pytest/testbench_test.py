@@ -181,6 +181,29 @@ STA_TEST_AP_SSID = "WT-PARTNER-AP"
 STA_TEST_AP_PASS = "benchstation"   # ≥ 8 chars, or the partner refuses WPA2
 
 
+def _partner_hosts(testbench, slot, ssid, within=45):
+    """Poll the partner's `status` until it reports hosting `ssid`.
+
+    Which AP, not just that there is one: a partner that has fallen back to
+    its portal is also an AP. A busy port is not an answer; keep asking.
+    """
+    deadline = time.time() + within
+    while time.time() < deadline:
+        try:
+            since = time.time()
+            testbench.serial_write(slot, text="status")
+            time.sleep(1.5)
+            out = testbench.serial_output(slot, lines=100, since=since)
+            if any(f"ap_ssid={ssid}" in ln.get("text", "")
+                   for ln in out.get("lines", [])):
+                time.sleep(2)            # beacons start just after the log line
+                return True
+        except Exception:
+            pass
+        time.sleep(3)
+    return False
+
+
 @pytest.mark.requires_dut
 class TestSTAMode:
     """WT-4xx: the bench as a station, against an AP the partner hosts.
@@ -387,10 +410,19 @@ class TestHTTPRelay:
             )
         _ap_stop_quietly(testbench)          # the radio is about to be a station
         testbench.serial_write(slot, text="forget")
-        time.sleep(20)
+        # `forget` reboots the partner into its portal. Wait for it to say the
+        # portal is up rather than sleeping a fixed time: the reboot usually
+        # takes under 20 s and sometimes more, and a join attempted before
+        # the AP is on the air fails as "network not found".
+        time.sleep(5)
+        if not _partner_hosts(testbench, slot, TEST_PARTNER_PORTAL, within=45):
+            pytest.skip(
+                f"precondition unmet: the partner never reported hosting "
+                f"'{TEST_PARTNER_PORTAL}' after `forget`"
+            )
 
-        joined = testbench.sta_join(TEST_PARTNER_PORTAL, "")
         try:
+            joined = testbench.sta_join(TEST_PARTNER_PORTAL, "")
             assert joined.get("ip", "").startswith("192.168.4."), (
                 f"joined '{TEST_PARTNER_PORTAL}' and got {joined}"
             )

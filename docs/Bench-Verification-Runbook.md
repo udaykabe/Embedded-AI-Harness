@@ -420,14 +420,17 @@ a leftover `hostapd`, the regulatory domain, the brcmfmac module option
 `feature_disable=0x82000` (not needed; leave it out, it costs the Pi WPA3),
 and the partner itself.
 
-**The bench's driver reload.** When a station join fails with exactly that
-line, the bench reloads `brcmfmac` once and retries (set
-`WIFI_STA_RADIO_RELOAD=0` in the portal's environment to turn it off). It was
-added for the radio-fault theory above and has not yet recovered a join. Its
-records are still useful: each reload adds a warning to the activity log, an
-entry to `radio_reloads` in `/api/wifi/ping`, and the wpa_supplicant log and
-driver messages in `/tmp/wifi-tester/radio-reload-N.log` on the Pi. Entries
-there mean the bench hit this failure, even on a run that passed.
+**What the bench records.** Every station join that fails this way adds an
+entry to `auth_timeouts` in `/api/wifi/ping`, with the system uptime and the
+number of joins since the portal started, and saves the wpa_supplicant log
+and the driver's messages to `/tmp/wifi-tester/auth-timeout-N.log` on the
+Pi. The join's error names the likely cause and this section. Entries there
+mean the bench hit this failure, even on a run that passed.
+
+The bench can also reload `brcmfmac` and retry once after such a timeout
+(`WIFI_STA_RADIO_RELOAD=1` in the portal's environment). It is off by
+default: it was added for the radio-fault theory above and never recovered
+a join.
 
 The tests that fail on an affected bench: WT-401, WT-404, WT-405, WT-506
 (HTTP via STA), and the captive portal tests WT-2101, WT-2103, WT-2104.

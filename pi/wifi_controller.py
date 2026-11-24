@@ -605,23 +605,31 @@ def sta_join(ssid, password="", timeout=15, _internal=False):
         log_offset = _file_size(WPA_LOG)
         connected = _sta_associate_unlocked(timeout)
 
-        # A Pi's built-in radio can wedge so that every join times out in the
-        # driver itself, and stays that way until its driver is reloaded (see
-        # the runbook, §8). Reload it once and try again, and say so: a
-        # silent recovery would hide the fault we still need to explain.
+        # An authentication timeout (status 16, no BSSID) is the radio never
+        # hearing the AP's reply. On the bench that was found to be another
+        # network on the AP's channel, louder than the AP (runbook §8). Keep
+        # the evidence and say so; reload the driver only if asked to.
         radio_reloaded = False
-        if not connected and STA_RADIO_RELOAD:
+        auth_timeout = False
+        if not connected and is_auth_timeout(_read_from(WPA_LOG, log_offset)):
+            auth_timeout = True
             driver = _wlan_driver()
-            if needs_radio_reload(_read_from(WPA_LOG, log_offset), driver):
+            radio_reloaded = STA_RADIO_RELOAD and driver in RELOADABLE_DRIVERS
+            if radio_reloaded:
                 _sta_stop_unlocked()
-                radio_reloaded = True
-                connected = _reload_radio_and_retry_unlocked(ssid, driver, timeout)
+            connected = _record_auth_timeout_unlocked(
+                ssid, driver, timeout, reload=radio_reloaded)
 
         if not connected:
             _sta_stop_unlocked()
-            raise RuntimeError(f"Failed to connect to '{ssid}' within {timeout}s"
-                               + (" (also after reloading the radio driver)"
-                                  if radio_reloaded else ""))
+            why = ""
+            if auth_timeout:
+                why = (" (authentication timed out: is another network on its"
+                       " channel louder than it? see runbook §8"
+                       + ("; reloading the radio driver did not help"
+                          if radio_reloaded else "") + ")")
+            raise RuntimeError(
+                f"Failed to connect to '{ssid}' within {timeout}s{why}")
 
         # Get IP via DHCP — try dhcpcd (Debian/Bookworm), dhclient, udhcpc
         # dhcpcd on Bookworm runs as a system daemon; -1 sends a control
@@ -699,30 +707,36 @@ def sta_join(ssid, password="", timeout=15, _internal=False):
 
 
 # ---------------------------------------------------------------------------
-# STA Mode: recovering a wedged radio
+# STA Mode: authentication timeouts
 # ---------------------------------------------------------------------------
-
-# Set WIFI_STA_RADIO_RELOAD=0 to turn the recovery off, e.g. to reproduce the
-# fault on purpose.
-STA_RADIO_RELOAD = os.environ.get("WIFI_STA_RADIO_RELOAD", "1") != "0"
-
-# Drivers the reload has been shown to cure. Others are left alone: reloading
-# a driver that is not wedged only costs time and hides a different fault.
-RELOADABLE_DRIVERS = {"brcmfmac"}
 
 # The driver giving up on authentication by itself: no reply was ever heard,
 # so no BSSID is named. A genuine rejection from an AP names the AP.
-_WEDGED_RE = re.compile(
+_AUTH_TIMEOUT_RE = re.compile(
     r"CTRL-EVENT-ASSOC-REJECT bssid=00:00:00:00:00:00 status_code=16\b")
 
+# Set WIFI_STA_RADIO_RELOAD=1 to reload the radio driver and retry once after
+# an authentication timeout. Off by default: it was added when the timeouts
+# were taken for a wedged radio, and it never recovered a join. The cause was
+# a neighbouring network on the AP's channel (runbook §8).
+STA_RADIO_RELOAD = os.environ.get("WIFI_STA_RADIO_RELOAD", "0") == "1"
+
+# Drivers a reload applies to, when it is turned on.
+RELOADABLE_DRIVERS = {"brcmfmac"}
+
 _sta_join_attempts = 0        # since the portal started
-_radio_reloads = []           # one record per reload, newest last
-_RADIO_RELOADS_KEPT = 20
+_auth_timeouts = []           # one record per timeout, newest last
+_AUTH_TIMEOUTS_KEPT = 20
+
+
+def is_auth_timeout(wpa_log_text):
+    """True when a failed join timed out authenticating with no reply heard."""
+    return bool(_AUTH_TIMEOUT_RE.search(wpa_log_text or ""))
 
 
 def needs_radio_reload(wpa_log_text, driver):
-    """True when a failed join looks like the wedged radio, not a bad network."""
-    return driver in RELOADABLE_DRIVERS and bool(_WEDGED_RE.search(wpa_log_text or ""))
+    """True when an opted-in reload applies: an auth timeout on a known driver."""
+    return driver in RELOADABLE_DRIVERS and is_auth_timeout(wpa_log_text)
 
 
 def _file_size(path):
@@ -813,48 +827,51 @@ def _reload_driver(driver):
     return False
 
 
-def _reload_radio_and_retry_unlocked(ssid, driver, timeout):
-    """Reload a wedged radio's driver and join once more. Returns connected."""
-    n = len(_radio_reloads) + 1
+def _record_auth_timeout_unlocked(ssid, driver, timeout, reload=False):
+    """Keep the evidence of an auth timeout; optionally reload and retry.
+
+    Returns whether the join is now connected (only ever after a reload)."""
+    n = len(_auth_timeouts) + 1
     uptime = _system_uptime_s()
     logger.warning(
-        "STA join to '%s' timed out in the driver (status 16): reloading %s "
-        "(reload #%d since portal start; system uptime %ss; %d joins since "
-        "portal start)", ssid, driver, n, uptime, _sta_join_attempts)
+        "STA join to '%s' timed out authenticating (status 16): often another "
+        "network on its channel, louder than it (runbook §8). Timeout #%d since "
+        "portal start; system uptime %ss; %d joins since portal start%s",
+        ssid, n, uptime, _sta_join_attempts,
+        f"; reloading {driver}" if reload else "")
 
-    # Keep what the next investigation needs, before the reload wipes it.
-    evidence = os.path.join(WORK_DIR, f"radio-reload-{n}.log")
+    evidence = os.path.join(WORK_DIR, f"auth-timeout-{n}.log")
     try:
         dmesg = _run(["dmesg"], timeout=10, check=False)
-        brcmf = "\n".join(ln for ln in dmesg.splitlines() if driver in ln)
+        drv = "\n".join(ln for ln in dmesg.splitlines() if driver and driver in ln)
         with open(evidence, "w") as f:
             f.write(f"ssid={ssid} driver={driver} uptime_s={uptime} "
                     f"joins_since_portal_start={_sta_join_attempts}\n\n")
             f.write("--- wpa_supplicant.log (tail) ---\n" + _tail(WPA_LOG, 4000))
             f.write(f"\n\n--- dmesg | grep {driver} (tail) ---\n"
-                    + "\n".join(brcmf.splitlines()[-40:]) + "\n")
+                    + "\n".join(drv.splitlines()[-40:]) + "\n")
     except Exception as exc:
-        logger.warning("Could not save radio-reload evidence: %s", exc)
+        logger.warning("Could not save auth-timeout evidence: %s", exc)
         evidence = None
 
-    came_back = _reload_driver(driver)
     connected = False
-    if came_back:
-        _release_wlan()
-        _flush_addr()
-        _run(["ip", "link", "set", WLAN_IF, "up"], check=False)
-        connected = _sta_associate_unlocked(timeout)
-    else:
-        logger.error("%s did not reappear after reloading %s", WLAN_IF, driver)
+    if reload:
+        if _reload_driver(driver):
+            _release_wlan()
+            _flush_addr()
+            _run(["ip", "link", "set", WLAN_IF, "up"], check=False)
+            connected = _sta_associate_unlocked(timeout)
+        else:
+            logger.error("%s did not reappear after reloading %s", WLAN_IF, driver)
+        logger.warning("Driver reload after timeout #%d %s", n,
+                       "recovered the join" if connected else "did NOT recover the join")
 
-    _radio_reloads.append({
+    _auth_timeouts.append({
         "at": int(time.time()), "ssid": ssid, "driver": driver,
         "system_uptime_s": uptime, "joins_since_portal_start": _sta_join_attempts,
-        "recovered": connected, "evidence": evidence,
+        "reloaded": reload, "recovered": connected, "evidence": evidence,
     })
-    del _radio_reloads[:-_RADIO_RELOADS_KEPT]
-    logger.warning("Radio reload #%d %s", n,
-                   "recovered the join" if connected else "did NOT recover the join")
+    del _auth_timeouts[:-_AUTH_TIMEOUTS_KEPT]
     return connected
 
 
@@ -1138,7 +1155,7 @@ def ping():
         "fw_version": VERSION,
         "uptime": int(time.monotonic() - _start_time),
         "sta_joins": _sta_join_attempts,
-        "radio_reloads": list(_radio_reloads),
+        "auth_timeouts": list(_auth_timeouts),
     }
 
 

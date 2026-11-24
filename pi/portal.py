@@ -2672,8 +2672,8 @@ def _do_enter_portal(portal_ssid: str, wifi_ssid: str, wifi_password: str,
     try:
         result = wifi_controller.sta_join(portal_ssid, password="", timeout=15)
         if result.get("radio_reloaded"):
-            log_activity("WiFi radio wedged (driver auth timeout): reloaded "
-                         "its driver and retried", "warn")
+            log_activity("WiFi STA authentication timed out; reloading "
+                         "the radio driver recovered it", "warn")
         log_activity(f"Connected to '{portal_ssid}' — IP: {result.get('ip', '?')}", "ok")
     except Exception as e:
         log_activity(f"Failed to join '{portal_ssid}': {e}", "error")
@@ -3397,9 +3397,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             result = wifi_controller.sta_join(ssid, password, timeout)
             if result.get("radio_reloaded"):
-                log_activity("WiFi radio wedged (driver auth timeout): reloaded "
-                             "its driver and retried — see /api/wifi/ping "
-                             "radio_reloads", "warn")
+                log_activity("WiFi STA authentication timed out; reloading "
+                             "the radio driver recovered it — see "
+                             "/api/wifi/ping auth_timeouts", "warn")
             log_activity(f"WiFi STA connected to '{ssid}' — IP: {result.get('ip', '?')}", "ok")
             self._send_json({"ok": True, **result})
         except Exception as e:
